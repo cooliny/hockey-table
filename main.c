@@ -14,26 +14,54 @@
  #define SYSCLK 32000000L
  #define TICK_FREQ 1000L
  
- /*
+
+  // STM32L051 Pinout
+  /*
   *                    ----------
   *              VDD -|1       32|- VSS
   *             PC14 -|2       31|- BOOT0
-  *             PC15 -|3       30|- PB7
-  *             NRST -|4       29|- PB6
-  *             VDDA -|5       28|- PB5
-  *              PA0 -|6       27|- PB4
-  *              PA1 -|7       26|- PB3   LCD_E
-  *              PA2 -|8       25|- PA15  LCD_RS
-  *              PA3 -|9       24|- PA14  LCD_D4
-  *              PA4 -|10      23|- PA13  LCD_D5
-  *  TIME_LED    PA5 -|11      22|- PA12  LCD_D6
-  *   HOME_IR    PA6 -|12      21|- PA11  LCD_D7
-  *   AWAY_IR    PA7 -|13      20|- PA10  TXD
-  *  HOME_LED    PB0 -|14      19|- PA9   RXD
-  *  AWAY_LED    PB1 -|15      18|- PA8   
+  *             PC15 -|3       30|- PB7    HOME_IR
+  *             NRST -|4       29|- PB6    AWAY_IR
+  *             VDDA -|5       28|- PB5    AWAY_LED
+  *     TIM22    PA0 -|6       27|- PB4    HOME_LED
+  *              PA1 -|7       26|- PB3    LCD_E
+  *   Speaker    PA2 -|8       25|- PA15   LCD_RS
+  *     25Q32    PA3 -|9       24|- PA14   LCD_D4
+  *  TIME_LED    PA4 -|10      23|- PA13   LCD_D5
+  *     25Q32    PA5 -|11      22|- PA12   LCD_D6
+  *     25Q32    PA6 -|12      21|- PA11   LCD_D7
+  *     25Q32    PA7 -|13      20|- PA10   RXD
+  *              PB0 -|14      19|- PA9    TXD
+  *              PB1 -|15      18|- PA8   
   *              VSS -|16      17|- VDD
   *                    ----------
   */
+
+  // PA0: Used for measuring 22.05kHz on TIM22 (but can be any GPIO pin)
+  // PA2: Speaker, general purpose output mode, configured to TIM21 CH1 to be used with PWM
+  // PA3: SPI Chip Select, general purpose output mode
+  // PA4: Period (time) LED, general purpose output mode
+  // PA5: SPI1 SCK, general purpose output mode
+  // PA6: SPI1 MISO, general purpose input mode
+  // PA7: SPI1 MOSI, general purpose output mode
+  // PA9: TXD (no declaration needed, for the BO230XS USB adapter) 
+  // PA10: RXD (no declaration needed, for the BO230XS USB adapter)
+  // PA11: LCD_D7, general purpose output mode
+  // PA12: LCD_D6, general purpose output mode
+  // PA13: LCD_D5, general purpose output mode
+  // PA14: LCD_D4, general purpose output mode
+  // PA15: LCD_RS, general purpose output mode
+
+  // PB3: LCD_E, general purpose output mode
+  // PB4: AWAY_LED, general purpose output mode
+  // PB5: HOME_LED, general purpose output mode
+  // PB6: AWAY_IR, general purpose input mode
+  // PB7: HOME_IR, general purpose input mode
+
+  // TIM2: Game clock counter
+  // TIM21: Generates PWM signal for speaker 
+  // TIM22: For playing sound with SPI
+
 
  void gpio_init(void);
  void timer2_init(void);
@@ -52,9 +80,6 @@
      lcd_init();
      timer2_init();
 
-     GPIOB->ODR &= ~BIT0; // Turn off Goal LED
-     GPIOB->ODR &= ~BIT1; // Turn off Goal LED
-
      sprintf(lcd_buff, "HOME  TIME  AWAY");
      lcd_print(lcd_buff, 1, 1);
 
@@ -71,12 +96,12 @@
 		 lcd_print(lcd_buff, 2, 1);
 
 		// Check if the home goal sensor is triggered 
-        if(GPIOA->IDR & BIT6) {
-            GPIOB->ODR &= ~BIT1; // Turn off Home Goal LED
+        if(GPIOB->IDR & BIT7) {
+            GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
         } else {
 			TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
             home_score++;
-            GPIOB->ODR |= BIT1; // Turn on Home Goal LED
+            GPIOB->ODR |= BIT4; // Turn on Home Goal LED
             sprintf(lcd_buff, "  %d   %d:%2.2d   %d ", home_score, minutes, seconds, away_score);
             lcd_print(lcd_buff, 2, 1);
             sleep(5000);
@@ -84,12 +109,12 @@
         }
 
 		// Check if the away goal sensor is triggered
-        if(GPIOA->IDR & BIT7) {
-            GPIOB->ODR &= ~BIT0; // Turn off Away Goal LED
+        if(GPIOB->IDR & BIT6) {
+            GPIOB->ODR &= ~BIT5; // Turn off Away Goal LED
         } else {
 			TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
             away_score++;
-            GPIOB->ODR |= BIT0; // Turn on Away Goal LED
+            GPIOB->ODR |= BIT5; // Turn on Away Goal LED
             sprintf(lcd_buff, "  %d   %d:%2.2d   %d ", home_score, minutes, seconds, away_score);
             lcd_print(lcd_buff, 2, 1);
             sleep(5000);
@@ -111,23 +136,22 @@
 	 GPIOB->OSPEEDR=0xFFFFFFFF;
 
 	 /* Goal LEDs as general purpose output mode */
-     GPIOB->MODER &= ~(BIT3 | BIT2 | BIT1 | BIT0); // for clearing
-     GPIOB->MODER |= BIT2 | BIT0; // 01 (output mode)
+     GPIOB->MODER &= ~(BIT11 | BIT10 | BIT9 | BIT8); // for clearing
+     GPIOB->MODER |= BIT10 | BIT8; // 01 (output mode)
 
 	 /* Period LEDs as general purpose output mode */
-	 GPIOA->MODER &= ~(BIT11 | BIT10); // for clearing 
-	 GPIOA->MODER |= BIT10; // 01 (output mode)
+	 GPIOA->MODER &= ~(BIT9 | BIT8); // for clearing 
+	 GPIOA->MODER |= BIT8; // 01 (output mode)
 
 	 /* IR Breakbeam Sensors as input, set to pull-down */	
-     GPIOA->MODER &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (input mode)
-     GPIOA->PUPDR &= ~(BIT17 | BIT16); // for clearing (pull-down)
-     GPIOA->PUPDR |= BIT15 | BIT13; // 10 (pull-down)
+     GPIOB->MODER &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (input mode)
+     GPIOB->PUPDR &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (pull-down)
+     GPIOB->PUPDR |= BIT15 | BIT13; // 10 (pull-down)
 
      /* LCD display as output, set to open-drain PA11-PA15, PB3 */
      GPIOA->MODER &= ~(BIT31 | BIT30 | BIT29 | BIT28 | BIT27 | BIT26 | BIT25 | BIT24 | BIT23 | BIT22); // for clearing
      GPIOA->MODER |= BIT30 | BIT28 | BIT26 | BIT24 | BIT22; // 01 (output mode)
      GPIOA->OTYPER &= ~(BIT11 | BIT12 | BIT13 | BIT14 | BIT15); // push-pull
-
      GPIOB->MODER &= ~(BIT7 | BIT6); // for clearing
      GPIOB->MODER |= BIT6; // 01 (output mode)
      GPIOB->OTYPER &= ~(BIT3); // push-pull
@@ -163,7 +187,7 @@ void TIM2_Handler(void)
 		 if (seconds == 0) {
 			 if (minutes == 0) {
 			 	 period_over = 1;
-				 GPIOA->ODR |= BIT5; // Turn on Period LED
+				 GPIOA->ODR |= BIT4; // Turn on Period LED
 			 } 
 			
 			 else {
