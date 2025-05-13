@@ -53,8 +53,8 @@
  // PA14: LCD_D4, general purpose output mode
  // PA15: LCD_RS, general purpose output mode
 
- // PB0: TM1637 DIO, general purpose output mode
- // PB1: TM1637 CLK, general purpose output mode
+ // PB0: TM1637 DIO, general purpose output mode **requires 2k pull-up resistor
+ // PB1: TM1637 CLK, general purpose output mode **requires 2k pull-up resistor
  // PB3: LCD_E, general purpose output mode
  // PB4: AWAY_LED, general purpose output mode
  // PB5: HOME_LED, general purpose output mode
@@ -71,8 +71,11 @@
  void tm1637Init(void);
  void tm1637DisplayDecimal(int v, int displaySeparator);
  void tm1637SetBrightness(char brightness);
+ char chartosegment(char c);
+ void tm1637ScrollMessage(const char* message, int delay_ms);
+ void checkReady(void);
 
- volatile uint8_t minutes = 5;
+ volatile uint8_t minutes = 3;
  volatile uint8_t seconds = 0;
  volatile uint8_t period_over = 0;
  volatile int home_ready_flag = 0;
@@ -102,19 +105,15 @@
 
          while (!(home_ready_flag && away_ready_flag))
          {
-             if (GPIOA->IDR & BIT0) { // Home Ready button pressed
-                 home_ready_flag = 1;
-                 GPIOB->ODR |= BIT5; // Turn on Home Goal LED
-             } 
-             if (GPIOA->IDR & BIT1) { // Away Ready button pressed
-                 away_ready_flag = 1;
-                 GPIOB->ODR |= BIT4; // Turn on Away Goal LED
-             }
+             checkReady();
+             tm1637ScrollMessage(" rEAdY UP  ", 500);
          }
+
+         sleep(3000); // Wait for 3 seconds before starting the game (maybe puck drop?)
 
          while(home_ready_flag && away_ready_flag) 
          {
-            
+             period_over = 0;
              GPIOA->ODR &= ~BIT4; // Turn off Period LED
 
              // Start the period timer
@@ -227,7 +226,7 @@ void TIM2_Handler(void)
                  GPIOA->ODR |= BIT4; // Turn on Period LED
                  home_ready_flag = 0;
                  away_ready_flag = 0;
-                 minutes = 5; // Reset and wait for user ready
+                 minutes = 3; // Reset and wait for user ready
                  seconds = 0;
              } 
        
@@ -282,9 +281,14 @@ void tm1637DisplayDecimal(int v, int displaySeparator)
 
      */
      const char segmentMap[] = {
-         0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, // 0-7
-         0x7f, 0x6f, 0x77, 0x7c, 0x39, 0x5e, 0x79, 0x71, // 8-9, A-F
+         0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, // 0-9
+         0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71, // A-F
+         0x6F, 0x76, 0x06, 0x0E, 0x76, 0x38, // G-L 
+         0x37, 0x54, 0x3F, 0x73, 0x3F, 0x50, // M-R
+         0x6D, 0x07, 0x3D, 0x1C, 0x7E, 0x76, // S-X
+         0x6C, 0x5B, // Y-Z
          0x00
+         // Note: Letters K, M, Q, T, V are not fully supported
      };
 
      unsigned char digitArr[4];
@@ -337,4 +341,96 @@ void tm1637SetBrightness(char brightness)
     _tm1637WriteByte(0x87 + brightness);
     _tm1637ReadResult();
     _tm1637Stop();
+}
+
+char chartosegment(char c) 
+{
+     switch(c) 
+     {
+         case 'A': return 0x77; 
+         case 'b': return 0x7C;
+         case 'C': return 0x39;
+         case 'd': return 0x5E;
+         case 'E': return 0x79;
+         case 'F': return 0x71;
+         case 'g': return 0x6F;
+         case 'H': return 0x76;
+         case 'I': return 0x06;
+         case 'J': return 0x0E;
+         case 'L': return 0x38;
+         case 'N': return 0x54;
+         case 'O': return 0x3F;
+         case 'P': return 0x73;
+         case 'r': return 0x50;
+         case 'S': return 0x6D;
+         case 'U': return 0x3E;
+         case 'X': return 0x76;
+         case 'Y': return 0x6E;
+         case 'Z': return 0x5B;
+         case ' ': return 0x00;
+         default: return 0x00; // Default case for unsupported characters (K, M, Q, T, V, W)
+     }
+}
+
+void tm1637ScrollMessage(const char* message, int delay_ms)
+{
+    int len = strlen(message);
+    char window[4];
+
+    for (int i = 0; i < len + 4; i++) {
+        checkReady();
+        char segments[4];
+
+        for (int j = 0; j < 4; j++) {
+            checkReady();
+            int msg_index = i - 3 + j;
+            if (msg_index >= 0 && msg_index < len) {
+                segments[j] = chartosegment(message[msg_index]);
+            } else {
+                segments[j] = 0x00; // Blank
+            }
+        }
+
+        checkReady();
+
+        // Start data transmission
+        _tm1637Start();
+        _tm1637WriteByte(0x40); // Set to auto-increment mode
+        _tm1637ReadResult();
+        _tm1637Stop();
+
+        checkReady();
+
+        _tm1637Start();
+        _tm1637WriteByte(0xC0); // Set starting address
+        _tm1637ReadResult();
+
+        for (int k = 0; k < 4; k++) {
+            checkReady();
+            _tm1637WriteByte(segments[k]);
+            _tm1637ReadResult();
+        }
+
+        checkReady();
+
+        _tm1637Stop();
+        tm1637SetBrightness(8);
+
+        checkReady();
+
+        // Delay between scroll steps
+        sleep(delay_ms);
+    }
+}
+
+void checkReady(void) 
+{
+     if (GPIOA->IDR & BIT0) { // Home Ready button pressed
+         home_ready_flag = 1;
+         GPIOB->ODR |= BIT5; // Turn on Home Goal LED
+     } 
+     if (GPIOA->IDR & BIT1) { // Away Ready button pressed
+         away_ready_flag = 1;
+         GPIOB->ODR |= BIT4; // Turn on Away Goal LED
+    }
 }
