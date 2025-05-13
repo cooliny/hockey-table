@@ -10,61 +10,67 @@
  #include "include/stm32l051xx.h"
  #include "include/serial.h"
  #include "util.h"
+ #include "tim1637.h"
  
  #define SYSCLK 32000000L
  #define TICK_FREQ 1000L
  
 
-  // STM32L051 Pinout
-  /*
-  *                    ----------
-  *              VDD -|1       32|- VSS
-  *             PC14 -|2       31|- BOOT0
-  *             PC15 -|3       30|- PB7    HOME_IR
-  *             NRST -|4       29|- PB6    AWAY_IR
-  *             VDDA -|5       28|- PB5    AWAY_LED
-  *  AWAY_RDY    PA0 -|6       27|- PB4    HOME_LED
-  *  HOME_RDY    PA1 -|7       26|- PB3    LCD_E
-  *   Speaker    PA2 -|8       25|- PA15   LCD_RS
-  *     25Q32    PA3 -|9       24|- PA14   LCD_D4
-  *  TIME_LED    PA4 -|10      23|- PA13   LCD_D5
-  *     25Q32    PA5 -|11      22|- PA12   LCD_D6
-  *     25Q32    PA6 -|12      21|- PA11   LCD_D7
-  *     25Q32    PA7 -|13      20|- PA10   RXD
-  *              PB0 -|14      19|- PA9    TXD
-  *              PB1 -|15      18|- PA8    TIM22 Output (for SPI)
-  *              VSS -|16      17|- VDD
-  *                    ----------
-  */
+ // STM32L051 Pinout
+ /*
+ *                    ----------
+ *              VDD -|1       32|- VSS
+ *             PC14 -|2       31|- BOOT0
+ *             PC15 -|3       30|- PB7    HOME_IR
+ *             NRST -|4       29|- PB6    AWAY_IR
+ *             VDDA -|5       28|- PB5    AWAY_LED
+ *  AWAY_RDY    PA0 -|6       27|- PB4    HOME_LED
+ *  HOME_RDY    PA1 -|7       26|- PB3    LCD_E
+ *   Speaker    PA2 -|8       25|- PA15   LCD_RS
+ *     25Q32    PA3 -|9       24|- PA14   LCD_D4
+ *  TIME_LED    PA4 -|10      23|- PA13   LCD_D5
+ *     25Q32    PA5 -|11      22|- PA12   LCD_D6
+ *     25Q32    PA6 -|12      21|- PA11   LCD_D7
+ *     25Q32    PA7 -|13      20|- PA10   RXD
+ *   1637DIO    PB0 -|14      19|- PA9    TXD
+ *   1637CLK    PB1 -|15      18|- PA8    TIM22 Output (for SPI)
+ *              VSS -|16      17|- VDD
+ *                    ----------
+ */
 
-  // PA2: Speaker, general purpose output mode, configured to TIM21 CH1 to be used with PWM
-  // PA3: SPI Chip Select, general purpose output mode
-  // PA4: Period (time) LED, general purpose output mode
-  // PA5: SPI1 SCK, general purpose output mode
-  // PA6: SPI1 MISO, general purpose input mode
-  // PA7: SPI1 MOSI, general purpose output mode
-  // PA8: Used for measuring 22.05kHz on TIM22 (but can be any GPIO pin)
-  // PA9: TXD (no declaration needed, for the BO230XS USB adapter) 
-  // PA10: RXD (no declaration needed, for the BO230XS USB adapter)
-  // PA11: LCD_D7, general purpose output mode
-  // PA12: LCD_D6, general purpose output mode
-  // PA13: LCD_D5, general purpose output mode
-  // PA14: LCD_D4, general purpose output mode
-  // PA15: LCD_RS, general purpose output mode
+ // PA2: Speaker, general purpose output mode, configured to TIM21 CH1 to be used with PWM 
+ // PA3: SPI Chip Select, general purpose output mode
+ // PA4: Period (time) LED, general purpose output mode
+ // PA5: SPI1 SCK, general purpose output mode
+ // PA6: SPI1 MISO, general purpose input mode
+ // PA7: SPI1 MOSI, general purpose output mode
+ // PA8: Used for measuring 22.05kHz on TIM22 (but can be any GPIO pin)
+ // PA9: TXD (no declaration needed, for the BO230XS USB adapter) 
+ // PA10: RXD (no declaration needed, for the BO230XS USB adapter)
+ // PA11: LCD_D7, general purpose output mode
+ // PA12: LCD_D6, general purpose output mode
+ // PA13: LCD_D5, general purpose output mode
+ // PA14: LCD_D4, general purpose output mode
+ // PA15: LCD_RS, general purpose output mode
 
-  // PB3: LCD_E, general purpose output mode
-  // PB4: AWAY_LED, general purpose output mode
-  // PB5: HOME_LED, general purpose output mode
-  // PB6: AWAY_IR, general purpose input mode
-  // PB7: HOME_IR, general purpose input mode
+ // PB0: TM1637 DIO, general purpose output mode
+ // PB1: TM1637 CLK, general purpose output mode
+ // PB3: LCD_E, general purpose output mode
+ // PB4: AWAY_LED, general purpose output mode
+ // PB5: HOME_LED, general purpose output mode
+ // PB6: AWAY_IR, general purpose input mode
+ // PB7: HOME_IR, general purpose input mode
 
-  // TIM2: Game clock counter
-  // TIM21: Generates PWM signal for speaker 
-  // TIM22: For playing sound with SPI
+ // TIM2: Game clock counter
+ // TIM21: Generates PWM signal for speaker 
+ // TIM22: For playing sound with SPI
 
-
+ // Function prototypes
  void gpio_init(void);
  void timer2_init(void);
+ void tm1637Init(void);
+ void tm1637DisplayDecimal(int v, int displaySeparator);
+ void tm1637SetBrightness(char brightness);
 
  volatile uint8_t minutes = 5;
  volatile uint8_t seconds = 0;
@@ -81,6 +87,7 @@
      gpio_init();
      lcd_init();
      timer2_init();
+     tm1637Init();
 
      sprintf(lcd_buff, "HOME  TIME  AWAY");
      lcd_print(lcd_buff, 1, 1);
@@ -88,7 +95,7 @@
      sprintf(lcd_buff, "  %d   %d:%2.2d   %d ", home_score, minutes, seconds, away_score);
      lcd_print(lcd_buff, 2, 1);
 
-     sleep(100);
+     tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MMSS format
      
      while (1) 
      {
@@ -116,6 +123,8 @@
              // Update the display every second of the time remaining and score
              sprintf(lcd_buff, "  %d   %d:%2.2d   %d ", home_score, minutes, seconds, away_score);
              lcd_print(lcd_buff, 2, 1);
+
+             tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MMSS format
 
              // Check if the home goal sensor is triggered 
              if(GPIOB->IDR & BIT7) {
@@ -232,4 +241,100 @@ void TIM2_Handler(void)
              seconds--;
          }
     }
+}
+
+void tm1637Init(void)
+{
+
+    RCC->IOPENR |= BIT1; // Enable GPIOB clock
+    GPIOB->OSPEEDR=0xFFFFFFFF; // Set GPIOB speed to very high
+
+    // DIO Pin
+    GPIOB->MODER &= ~(BIT1 | BIT0); // for clearing
+    GPIOB->MODER |= BIT0; // 01 (output mode)
+    GPIOB->OTYPER |= BIT0; // Open drain
+    GPIOB->PUPDR &= ~(BIT1 | BIT0); // for clearing
+    GPIOB->PUPDR |= BIT0; // 01 (pull-up)
+
+    // CLK Pin
+    GPIOB->MODER &= ~(BIT3 | BIT2); // for clearing
+    GPIOB->MODER |= BIT2; // 01 (output mode)
+    GPIOB->OTYPER |= BIT1; // Open drain
+    GPIOB->PUPDR &= ~(BIT3 | BIT2); // for clearing
+    GPIOB->PUPDR |= BIT2; // 01 (pull-up)
+
+    tm1637SetBrightness(8);
+}
+
+// v: number to display
+// displaySeparator: 0 = no separator, 1 = display :
+void tm1637DisplayDecimal(int v, int displaySeparator)
+{
+     /* Segment Map: follows hgfe_dcba, converted to hexadecimal
+
+         a
+        -----
+     f |  g  |b
+        -----
+     e |     |c   
+        -----   . h
+          d
+
+     */
+     const char segmentMap[] = {
+         0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, // 0-7
+         0x7f, 0x6f, 0x77, 0x7c, 0x39, 0x5e, 0x79, 0x71, // 8-9, A-F
+         0x00
+     };
+
+     unsigned char digitArr[4];
+
+     // Puts the number into the digit array in reverse order
+     // E.g. if v= 1234, then digitArr[0] = 4, digitArr[1] = 3, digitArr[2] = 2, digitArr[3] = 1
+     for (int i = 0; i < 4; ++i) {
+         digitArr[i] = segmentMap[v % 10];
+        
+         // Set the decimal point for the third digit (h) 
+         if (i == 2 && displaySeparator) {
+             digitArr[i] |= 1 << 7;
+         }
+         v /= 10; 
+     }
+
+     // The following data transfer is done according to the TIM1637 datasheet, writing SRAM in address auto mode (p4)
+
+     // Set the data write mode
+     _tm1637Start(); // Start transmission
+     _tm1637WriteByte(0x40); // Set data write mode (auto address) -> Use 0x44 for fixed address
+     _tm1637ReadResult(); 
+     _tm1637Stop(); // End transmission
+
+     // Set the address
+     _tm1637Start();
+     _tm1637WriteByte(0xC0); // set display address to the first digit (0xC0)
+     _tm1637ReadResult();
+
+     // Write the digits in reverse order (to be correctly displayed)
+     for (int i = 0; i < 4; ++i) {
+         _tm1637WriteByte(digitArr[3 - i]);
+         _tm1637ReadResult();
+     }
+     
+     // Set the brightness
+     tm1637SetBrightness(8); // Set brightness to maximum
+}
+
+// Valid brightness values: 0 - 8.
+// 0 = display off.
+void tm1637SetBrightness(char brightness)
+{
+    // Brightness command:
+    // 1000 0XXX = display off
+    // 1000 1BBB = display on, brightness 0-7
+    // X = don't care
+    // B = brightness
+    _tm1637Start();
+    _tm1637WriteByte(0x87 + brightness);
+    _tm1637ReadResult();
+    _tm1637Stop();
 }
