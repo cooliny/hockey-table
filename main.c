@@ -1,5 +1,5 @@
 /*
- * Hockey Table: Goal Detection and Lights
+ * Hockey Table: Goal Detection, Lights, and Time Display
  * main.c
  */
 
@@ -53,8 +53,8 @@
  // PA14: LCD_D4, general purpose output mode
  // PA15: LCD_RS, general purpose output mode
 
- // PB0: TM1637 DIO, general purpose output mode **requires 2k pull-up resistor
- // PB1: TM1637 CLK, general purpose output mode **requires 2k pull-up resistor
+ // PB0: TM1637 DIO, general purpose output mode **requires 2k pull-up resistor**
+ // PB1: TM1637 CLK, general purpose output mode **requires 2k pull-up resistor**
  // PB3: LCD_E, general purpose output mode
  // PB4: AWAY_LED, general purpose output mode
  // PB5: HOME_LED, general purpose output mode
@@ -75,9 +75,21 @@
  void tm1637ScrollMessage(const char* message, int delay_ms);
  void checkReady(void);
 
+ // Global Variables 
+
+ // Time tracking
  volatile uint8_t minutes = 3;
  volatile uint8_t seconds = 0;
+
+ // Period tracking
+ volatile uint8_t period = 1; 
  volatile uint8_t period_over = 0;
+
+ // Score tracking
+ volatile uint8_t home_score = 0;
+ volatile uint8_t away_score = 0;
+
+ // Ready flags
  volatile int home_ready_flag = 0;
  volatile int away_ready_flag = 0;
  
@@ -85,32 +97,74 @@
  {
 
      char lcd_buff[MAXBUFFER];
-     int home_score = 0, away_score = 0;
 
      gpio_init();
      lcd_init();
      timer2_init();
      tm1637Init();
 
-     sprintf(lcd_buff, "HOME  TIME  AWAY");
+     sprintf(lcd_buff, "HOME PERIOD AWAY");
      lcd_print(lcd_buff, 1, 1);
 
-     sprintf(lcd_buff, "  %d   %d:%2.2d   %d ", home_score, minutes, seconds, away_score);
+     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
      lcd_print(lcd_buff, 2, 1);
 
-     tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MMSS format
+     tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MM:SS format
      
      while (1) 
      {
 
+         // Waiting for user ready: rolls a display message and handles end-game conditions
          while (!(home_ready_flag && away_ready_flag))
          {
-             checkReady();
-             tm1637ScrollMessage(" rEAdY UP  ", 500);
+
+             // If periods 1-3
+             if(period <= 3) {
+                 checkReady();
+                 tm1637ScrollMessage(" rEAdY UP  ", 500);
+
+             }
+
+             // Display the final score once game ends
+             if(period > 3) {
+
+                if(home_score != away_score) {
+
+                     TIM2->CR1 &= ~TIM_CR1_CEN; 
+
+                     if(home_score > away_score) {
+                         sprintf(lcd_buff, "HOME <WINS  AWAY");
+                         lcd_print(lcd_buff, 1, 1);
+                         sprintf(lcd_buff, "  %d          %d ", home_score, away_score);
+                         lcd_print(lcd_buff, 2, 1);
+                     }
+
+                     else {
+                         sprintf(lcd_buff, "HOME  WINS> AWAY");
+                         lcd_print(lcd_buff, 1, 1);
+                         sprintf(lcd_buff, "  %d          %d ", home_score, away_score);
+                         lcd_print(lcd_buff, 2, 1);
+                     }
+
+                     tm1637ScrollMessage(" FInAL SCOrE ", 500);
+                        
+                }
+
+                // If tied move to overtime
+                else if(home_score == away_score) {
+                     sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
+                     lcd_print(lcd_buff, 2, 1);
+
+                     checkReady();
+                     tm1637ScrollMessage(" rEAdY UP  ", 500);
+                }
+
+             }
          }
 
-         sleep(3000); // Wait for 3 seconds before starting the game (maybe puck drop?)
+         sleep(3000); // Wait for 3 seconds once ready before starting the period puck drop
 
+         // While the game is in progress check for goal scores + score updates
          while(home_ready_flag && away_ready_flag) 
          {
              period_over = 0;
@@ -119,37 +173,77 @@
              // Start the period timer
              TIM2->CR1 |= TIM_CR1_CEN; 
 
-             // Update the display every second of the time remaining and score
-             sprintf(lcd_buff, "  %d   %d:%2.2d   %d ", home_score, minutes, seconds, away_score);
-             lcd_print(lcd_buff, 2, 1);
+             // For periods 1-3
+             if(period <= 3) {
 
-             tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MMSS format
+                 // Update the display every second of the time remaining and score
+                 sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
+                 lcd_print(lcd_buff, 2, 1);
 
-             // Check if the home goal sensor is triggered 
-             if(GPIOB->IDR & BIT7) {
+                 tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MMSS format
+
+                 // Check if the home goal sensor is triggered 
+                 if(GPIOB->IDR & BIT7) {
+                     GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
+                 } else {
+                     TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+                     home_score++;
+                     GPIOB->ODR |= BIT4; // Turn on Home Goal LED
+                     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
+                     lcd_print(lcd_buff, 2, 1);
+                     sleep(5000); // Give 5 seconds for user to take puck out of goal
+                     TIM2->CR1 |= TIM_CR1_CEN;    // Resume timer 
+                 }
+
+                 // Check if the away goal sensor is triggered
+                 if(GPIOB->IDR & BIT6) {
+                     GPIOB->ODR &= ~BIT5; // Turn off Away Goal LED
+                 } else {
+                     TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+                     away_score++;
+                     GPIOB->ODR |= BIT5; // Turn on Away Goal LED
+                     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
+                     lcd_print(lcd_buff, 2, 1);
+                     sleep(5000); // Give 5 seconds for user to take puck out of goal
+                     TIM2->CR1 |= TIM_CR1_CEN;    // Resume timer 
+                 }
+
+             }
+
+             // If in overtime -> sudden death, game ends once goal scored
+             if(period > 3) {
+
+                 tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MMSS format
                  GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
-             } else {
-                 TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
-                 home_score++;
-                 GPIOB->ODR |= BIT4; // Turn on Home Goal LED
-                 sprintf(lcd_buff, "  %d   %d:%2.2d   %d ", home_score, minutes, seconds, away_score);
-                 lcd_print(lcd_buff, 2, 1);
-                 sleep(5000);
-                 TIM2->CR1 |= TIM_CR1_CEN;    // Resume timer 
+                 GPIOB->ODR &= ~BIT5; // Turn off Home Goal LED
+
+                 // Check if the home goal sensor is triggered 
+                 if(GPIOB->IDR & BIT7) {
+                     GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
+                 } else {
+                     TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+                     home_score++;
+                     GPIOB->ODR |= BIT4; // Turn on Home Goal LED
+                     sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
+                     lcd_print(lcd_buff, 2, 1);
+                     home_ready_flag = 0;
+                     away_ready_flag = 0;
+                 }
+
+                 // Check if the away goal sensor is triggered
+                 if(GPIOB->IDR & BIT6) {
+                     GPIOB->ODR &= ~BIT5; // Turn off Away Goal LED
+                 } else {
+                     TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+                     away_score++;
+                     GPIOB->ODR |= BIT5; // Turn on Away Goal LED
+                     sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
+                     lcd_print(lcd_buff, 2, 1);
+                     home_ready_flag = 0;
+                     away_ready_flag = 0;
+                 }
              }
 
-             // Check if the away goal sensor is triggered
-             if(GPIOB->IDR & BIT6) {
-                 GPIOB->ODR &= ~BIT5; // Turn off Away Goal LED
-             } else {
-                 TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
-                 away_score++;
-                 GPIOB->ODR |= BIT5; // Turn on Away Goal LED
-                 sprintf(lcd_buff, "  %d   %d:%2.2d   %d ", home_score, minutes, seconds, away_score);
-                 lcd_print(lcd_buff, 2, 1);
-                 sleep(5000);
-                 TIM2->CR1 |= TIM_CR1_CEN;    // Resume timer 
-             }
         }
 
     }
@@ -213,22 +307,28 @@
      __enable_irq();
 }    
 
+// Timer 2 interrupt handler: 
+// This only handles the time display and increments the period once over
 void TIM2_Handler(void) 
 {
+     char lcd_buff[MAXBUFFER];
 
      TIM2->SR &= ~TIM_SR_UIF; // Then clear the interrupt flag immediately
 
      if (!period_over) { 
          if (seconds == 0) {
              if (minutes == 0) {
+
+                 // Period is over 
                  TIM2->CR1 &= ~TIM_CR1_CEN; // Stop timer
                  period_over = 1;
+                 period++;
                  GPIOA->ODR |= BIT4; // Turn on Period LED
                  home_ready_flag = 0;
                  away_ready_flag = 0;
                  minutes = 3; // Reset and wait for user ready
                  seconds = 0;
-             } 
+             }
        
              else {
                  minutes--;
@@ -282,13 +382,7 @@ void tm1637DisplayDecimal(int v, int displaySeparator)
      */
      const char segmentMap[] = {
          0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, // 0-9
-         0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71, // A-F
-         0x6F, 0x76, 0x06, 0x0E, 0x76, 0x38, // G-L 
-         0x37, 0x54, 0x3F, 0x73, 0x3F, 0x50, // M-R
-         0x6D, 0x07, 0x3D, 0x1C, 0x7E, 0x76, // S-X
-         0x6C, 0x5B, // Y-Z
          0x00
-         // Note: Letters K, M, Q, T, V are not fully supported
      };
 
      unsigned char digitArr[4];
@@ -358,7 +452,7 @@ char chartosegment(char c)
          case 'I': return 0x06;
          case 'J': return 0x0E;
          case 'L': return 0x38;
-         case 'N': return 0x54;
+         case 'n': return 0x54;
          case 'O': return 0x3F;
          case 'P': return 0x73;
          case 'r': return 0x50;
