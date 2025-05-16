@@ -26,25 +26,20 @@
  *             VDDA -|5       28|- PB5    AWAY_LED
  *  AWAY_RDY    PA0 -|6       27|- PB4    HOME_LED
  *  HOME_RDY    PA1 -|7       26|- PB3    LCD_E
- *   Speaker    PA2 -|8       25|- PA15   LCD_RS
- *     25Q32    PA3 -|9       24|- PA14   LCD_D4
+ *   WS2812B    PA2 -|8       25|- PA15   LCD_RS
+ *              PA3 -|9       24|- PA14   LCD_D4
  *  TIME_LED    PA4 -|10      23|- PA13   LCD_D5
- *     25Q32    PA5 -|11      22|- PA12   LCD_D6
- *     25Q32    PA6 -|12      21|- PA11   LCD_D7
- *     25Q32    PA7 -|13      20|- PA10   RXD
+ *              PA5 -|11      22|- PA12   LCD_D6
+ *              PA6 -|12      21|- PA11   LCD_D7
+ *              PA7 -|13      20|- PA10   RXD
  *   1637DIO    PB0 -|14      19|- PA9    TXD
- *   1637CLK    PB1 -|15      18|- PA8    TIM22 Output (for SPI)
+ *   1637CLK    PB1 -|15      18|- PA8    
  *              VSS -|16      17|- VDD
  *                    ----------
  */
 
- // PA2: Speaker, general purpose output mode, configured to TIM21 CH1 to be used with PWM 
- // PA3: SPI Chip Select, general purpose output mode
+ // PA2: WS2812B LED light ring, general purpose output mode
  // PA4: Period (time) LED, general purpose output mode
- // PA5: SPI1 SCK, general purpose output mode
- // PA6: SPI1 MISO, general purpose input mode
- // PA7: SPI1 MOSI, general purpose output mode
- // PA8: Used for measuring 22.05kHz on TIM22 (but can be any GPIO pin)
  // PA9: TXD (no declaration needed, for the BO230XS USB adapter) 
  // PA10: RXD (no declaration needed, for the BO230XS USB adapter)
  // PA11: LCD_D7, general purpose output mode
@@ -61,19 +56,18 @@
  // PB6: AWAY_IR, general purpose input mode
  // PB7: HOME_IR, general purpose input mode
 
- // TIM2: Game clock counter
- // TIM21: Generates PWM signal for speaker 
- // TIM22: For playing sound with SPI
+ // TIM21: Game clock counter
 
  // Function prototypes
  void gpio_init(void);
- void timer2_init(void);
+ void timer21_init(void);
  void tm1637Init(void);
+ char chartosegment(char c);
+ void checkReady(void);
  void tm1637DisplayDecimal(int v, int displaySeparator);
  void tm1637SetBrightness(char brightness);
- char chartosegment(char c);
  void tm1637ScrollMessage(const char* message, int delay_ms);
- void checkReady(void);
+
 
  // Global Variables 
 
@@ -100,7 +94,7 @@
 
      gpio_init();
      lcd_init();
-     timer2_init();
+     timer21_init();
      tm1637Init();
 
      sprintf(lcd_buff, "HOME PERIOD AWAY");
@@ -130,7 +124,7 @@
 
                 if(home_score != away_score) {
 
-                     TIM2->CR1 &= ~TIM_CR1_CEN; 
+                     TIM21->CR1 &= ~TIM_CR1_CEN; 
 
                      if(home_score > away_score) {
                          sprintf(lcd_buff, "HOME <WINS  AWAY");
@@ -171,7 +165,7 @@
              GPIOA->ODR &= ~BIT4; // Turn off Period LED
 
              // Start the period timer
-             TIM2->CR1 |= TIM_CR1_CEN; 
+             TIM21->CR1 |= TIM_CR1_CEN; 
 
              // For periods 1-3
              if(period <= 3) {
@@ -186,26 +180,26 @@
                  if(GPIOB->IDR & BIT7) {
                      GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
                  } else {
-                     TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+                     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
                      home_score++;
                      GPIOB->ODR |= BIT4; // Turn on Home Goal LED
                      sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
                      lcd_print(lcd_buff, 2, 1);
                      sleep(5000); // Give 5 seconds for user to take puck out of goal
-                     TIM2->CR1 |= TIM_CR1_CEN;    // Resume timer 
+                     TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
                  }
 
                  // Check if the away goal sensor is triggered
                  if(GPIOB->IDR & BIT6) {
                      GPIOB->ODR &= ~BIT5; // Turn off Away Goal LED
                  } else {
-                     TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+                     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
                      away_score++;
                      GPIOB->ODR |= BIT5; // Turn on Away Goal LED
                      sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
                      lcd_print(lcd_buff, 2, 1);
                      sleep(5000); // Give 5 seconds for user to take puck out of goal
-                     TIM2->CR1 |= TIM_CR1_CEN;    // Resume timer 
+                     TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
                  }
 
              }
@@ -221,7 +215,7 @@
                  if(GPIOB->IDR & BIT7) {
                      GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
                  } else {
-                     TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+                     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
                      home_score++;
                      GPIOB->ODR |= BIT4; // Turn on Home Goal LED
                      sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
@@ -234,7 +228,7 @@
                  if(GPIOB->IDR & BIT6) {
                      GPIOB->ODR &= ~BIT5; // Turn off Away Goal LED
                  } else {
-                     TIM2->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+                     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
                      away_score++;
                      GPIOB->ODR |= BIT5; // Turn on Away Goal LED
                      sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
@@ -288,39 +282,37 @@
 
  }
 
- void timer2_init(void) 
+ void timer21_init(void) 
 {
-     RCC->APB1ENR |= BIT0;  // Enable clock for TIM2 (p177)
-
-     // p346: TIM2 Registers
+     RCC->APB2ENR |= BIT2;  // Enable clock for TIM21 (p176)
 
      // Since SYSCLK is 32MHz, we can prescale the timer to 32000 to get a 1kHz (1s) clock
-     TIM2->PSC = 32000 - 1;  // 32 MHz / 32000 = 1 kHz (timer divides clock every 32000 ticks)
-     TIM2->ARR = 1000 - 1;   // 1 kHz / 1000 = 1 Hz (timer overflows every 1000 ticks)
+     TIM21->PSC = 32000 - 1;  // 32 MHz / 32000 = 1 kHz (timer divides clock every 32000 ticks)
+     TIM21->ARR = 1000 - 1;   // 1 kHz / 1000 = 1 Hz (timer overflows every 1000 ticks)
 
-     NVIC->ISER[0] |= BIT15; // enable timer 2 interrupts in the NVIC (position 15 in the ISER register - p240)
+     NVIC->ISER[0] |= BIT20; // enable timer 2 interrupts in the NVIC (position 15 in the ISER register - p240)
 
-     TIM2->CR1 &= ~TIM_CR1_DIR; // Upcounting 
-     TIM2->CR1 |= TIM_CR1_ARPE; // ARPE enable       
-     TIM2->DIER |= TIM_DIER_UIE;  // Enable DMA/interrupt register
+     TIM21->CR1 &= ~TIM_CR1_DIR; // Upcounting 
+     TIM21->CR1 |= TIM_CR1_ARPE; // ARPE enable       
+     TIM21->DIER |= TIM_DIER_UIE;  // Enable DMA/interrupt register
 
-     __enable_irq();
+     __enable_irq(); // Enable interrupts
 }    
 
 // Timer 2 interrupt handler: 
 // This only handles the time display and increments the period once over
-void TIM2_Handler(void) 
+void TIM21_Handler(void) 
 {
      char lcd_buff[MAXBUFFER];
 
-     TIM2->SR &= ~TIM_SR_UIF; // Then clear the interrupt flag immediately
+     TIM21->SR &= ~TIM_SR_UIF; // Then clear the interrupt flag immediately
 
      if (!period_over) { 
          if (seconds == 0) {
              if (minutes == 0) {
 
                  // Period is over 
-                 TIM2->CR1 &= ~TIM_CR1_CEN; // Stop timer
+                 TIM21->CR1 &= ~TIM_CR1_CEN; // Stop timer
                  period_over = 1;
                  period++;
                  GPIOA->ODR |= BIT4; // Turn on Period LED
@@ -342,6 +334,48 @@ void TIM2_Handler(void)
     }
 }
 
+char chartosegment(char c) 
+{
+     switch(c) 
+     {
+         case 'A': return 0x77; 
+         case 'b': return 0x7C;
+         case 'C': return 0x39;
+         case 'd': return 0x5E;
+         case 'E': return 0x79;
+         case 'F': return 0x71;
+         case 'g': return 0x6F;
+         case 'H': return 0x76;
+         case 'I': return 0x06;
+         case 'J': return 0x0E;
+         case 'L': return 0x38;
+         case 'n': return 0x54;
+         case 'O': return 0x3F;
+         case 'P': return 0x73;
+         case 'r': return 0x50;
+         case 'S': return 0x6D;
+         case 'U': return 0x3E;
+         case 'X': return 0x76;
+         case 'Y': return 0x6E;
+         case 'Z': return 0x5B;
+         case ' ': return 0x00;
+         default: return 0x00; // Default case for unsupported characters (K, M, Q, T, V, W)
+     }
+}
+
+void checkReady(void) 
+{
+     if (GPIOA->IDR & BIT0) { // Home Ready button pressed
+         home_ready_flag = 1;
+         GPIOB->ODR |= BIT5; // Turn on Home Goal LED
+     } 
+     if (GPIOA->IDR & BIT1) { // Away Ready button pressed
+         away_ready_flag = 1;
+         GPIOB->ODR |= BIT4; // Turn on Away Goal LED
+    }
+}
+
+// Initializes the pins for the TIM1637 Module (changes GPIO pins if necessary)
 void tm1637Init(void)
 {
 
@@ -437,35 +471,7 @@ void tm1637SetBrightness(char brightness)
     _tm1637Stop();
 }
 
-char chartosegment(char c) 
-{
-     switch(c) 
-     {
-         case 'A': return 0x77; 
-         case 'b': return 0x7C;
-         case 'C': return 0x39;
-         case 'd': return 0x5E;
-         case 'E': return 0x79;
-         case 'F': return 0x71;
-         case 'g': return 0x6F;
-         case 'H': return 0x76;
-         case 'I': return 0x06;
-         case 'J': return 0x0E;
-         case 'L': return 0x38;
-         case 'n': return 0x54;
-         case 'O': return 0x3F;
-         case 'P': return 0x73;
-         case 'r': return 0x50;
-         case 'S': return 0x6D;
-         case 'U': return 0x3E;
-         case 'X': return 0x76;
-         case 'Y': return 0x6E;
-         case 'Z': return 0x5B;
-         case ' ': return 0x00;
-         default: return 0x00; // Default case for unsupported characters (K, M, Q, T, V, W)
-     }
-}
-
+// Displays a scrolling message across the seven-segments
 void tm1637ScrollMessage(const char* message, int delay_ms)
 {
     int len = strlen(message);
@@ -514,17 +520,5 @@ void tm1637ScrollMessage(const char* message, int delay_ms)
 
         // Delay between scroll steps
         sleep(delay_ms);
-    }
-}
-
-void checkReady(void) 
-{
-     if (GPIOA->IDR & BIT0) { // Home Ready button pressed
-         home_ready_flag = 1;
-         GPIOB->ODR |= BIT5; // Turn on Home Goal LED
-     } 
-     if (GPIOA->IDR & BIT1) { // Away Ready button pressed
-         away_ready_flag = 1;
-         GPIOB->ODR |= BIT4; // Turn on Away Goal LED
     }
 }
