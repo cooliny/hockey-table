@@ -4,40 +4,70 @@
 #include "tim1637.h"
 #include "globals.h"
 
-// Initializes the pins for the TIM1637 Module (changes GPIO pins if necessary)
+/* 
+ *
+ * TIM1637 module follows a two-wire data-sending protocol according to the datasheet
+ * 
+ * We write SRAM data in address auto increment 1 mode: 
+ * 
+ * 1. Start Condition
+ * 2. Command 1 (set data) with 8 posedge CLK
+ * 3. ACK
+ * 4. Stop Condition
+ * 5. Start Condition
+ * 6. Command 2 (set address) with 8 posedge CLK
+ * 7. ACK
+ * 8. Transfer the actual data (each with 8 posedge CLK and an ACK)
+ * 9. Start Condition
+ * 10. Command 3 (control display)
+ * 11. ACK
+ * 12. Stop Condition
+ * 
+ * Start Condition: 
+ * CLK is high and DIO changes from high to low
+ * 
+ * Stop Condition: 
+ * CLK is high and DIO changes from low to high 
+ * 
+ * ACK: 
+ * DIO is low and CLK changes from low to high 
+ * 
+ * Command 1 (set data): 
+ * → 0x40 (auto address increment)
+ * → 0x44 (fixed address)
+ * 
+ * Command 2 (set address): 
+ * → 0xC0, 0xC1, 0xC2, 0xC3 (on which digit of TIM1637 to display data)
+ * 
+ * Command 3 (control display): 
+ * → Pick between 0x87 (no brightness) to 0x8F (may brightness)
+ * 
+*/
+
+
+// Initializes the CLK and DIO pins for the TIM1637 Module 
 void tm1637Init(void)
 {
 
-    RCC->IOPENR |= BIT1; // Enable GPIOB clock
-    GPIOB->OSPEEDR=0xFFFFFFFF; // Set GPIOB speed to very high
+    RCC->IOPENR |= RCC_IOPENR_GPIOAEN;
+    RCC->IOPENR |= RCC_IOPENR_GPIOBEN;
 
-    // DIO Pin
-    GPIOB->MODER &= ~(BIT1 | BIT0); // for clearing
-    GPIOB->MODER |= BIT0; // 01 (output mode)
-    GPIOB->OTYPER |= BIT0; // Open drain
-    GPIOB->PUPDR &= ~(BIT1 | BIT0); // for clearing
-    GPIOB->PUPDR |= BIT0; // 01 (pull-up)
+    GPIOA->OSPEEDR=0xFFFFFFFF;
+    GPIOB->OSPEEDR=0xFFFFFFFF;
 
-    // CLK Pin
-    GPIOB->MODER &= ~(BIT3 | BIT2); // for clearing
-    GPIOB->MODER |= BIT2; // 01 (output mode)
-    GPIOB->OTYPER |= BIT1; // Open drain
-    GPIOB->PUPDR &= ~(BIT3 | BIT2); // for clearing
-    GPIOB->PUPDR |= BIT2; // 01 (pull-up)
+    TIM1637_DIO_PORT->MODER = ((TIM1637_DIO_PORT->MODER & ~(0x3 << TIM1637_DIO_PIN * 2)) | (0x1 << TIM1637_DIO_PIN * 2));
+    TIM1637_CLK_PORT->MODER = ((TIM1637_CLK_PORT->MODER & ~(0x3 << TIM1637_CLK_PIN * 2)) | (0x1 << TIM1637_CLK_PIN * 2));
+
+    TIM1637_DIO_PORT->OTYPER = (TIM1637_DIO_PORT->OTYPER | (0x1 << TIM1637_DIO_PIN));
+    TIM1637_CLK_PORT->OTYPER = (TIM1637_CLK_PORT->OTYPER | (0x1 << TIM1637_CLK_PIN));
+
+    TIM1637_DIO_PORT->PUPDR = ((TIM1637_DIO_PORT->PUPDR & ~(0x3 << TIM1637_DIO_PIN * 2)) | (0x1 << TIM1637_DIO_PIN * 2));
+    TIM1637_CLK_PORT->PUPDR = ((TIM1637_CLK_PORT->PUPDR & ~(0x3 << TIM1637_CLK_PIN * 2)) | (0x1 << TIM1637_CLK_PIN * 2));
 
     tm1637SetBrightness(8);
 }
 
-// Start/Stop Conditions for the TIM1637:
-// When CLK is high and DIO changes from high to low, data input starts
-// When CLK is high and DIO changes from low to high, data input ends
-
-/*
-*  Start condition (signals that new command coming): 
-*  1. DIO/CLK high
-*  2. DIO goes low while CLK remains high
-*  3. CLK low to begin the transmission
-*/
+// Start condition for TIM1637
 void _tm1637Start(void)
 {
     _tm1637ClkHigh();
@@ -46,12 +76,7 @@ void _tm1637Start(void)
     _tm1637DioLow();
 }
 
-/*
-*  Stop condition (transmission complete): 
-*  1. CLK/DIO low
-*  2. CLK goes high while DIO remains low
-*  3. DIO high to stop the transmission
-*/
+// Stop condition for TIM1637
 void _tm1637Stop(void)
 {
     _tm1637ClkLow();
@@ -63,19 +88,7 @@ void _tm1637Stop(void)
     _tm1637DioHigh();
 }
 
-void _tm1637ReadResult(void)
-{
-    _tm1637ClkLow();
-    _tm1637DelayUsec(5);
-    // while (dio); // We're cheating here and not actually reading back the response.
-    _tm1637ClkHigh();
-    _tm1637DelayUsec(2);
-    _tm1637ClkLow();
-}
-
-// Data command setting: 0x40 for auto address increment, 0x44 for fixed address
-// Address command setting: 0xC0-0xC5 for display address
-// Brightness command setting: 0x87-0x8F for brightness 0-7
+// Writes a byte with DIO (8 bits of data), followed by a posedge of CLK
 void _tm1637WriteByte(unsigned char b)
 {
     for (int i = 0; i < 8; ++i) {
@@ -93,6 +106,18 @@ void _tm1637WriteByte(unsigned char b)
     }
 }
 
+// Acts as the ACK after each data bit is sent
+void _tm1637ReadResult(void)
+{
+    _tm1637ClkLow();
+    _tm1637DelayUsec(5);
+    // while (dio); // We're cheating here and not actually reading back the response.
+    _tm1637ClkHigh();
+    _tm1637DelayUsec(2);
+    _tm1637ClkLow();
+}
+
+// Delay function 
 void _tm1637DelayUsec(unsigned int i)
 {
      for (; i>0; i--) {
@@ -102,28 +127,31 @@ void _tm1637DelayUsec(unsigned int i)
      }
 }
 
+// Sets CLK pin high
 void _tm1637ClkHigh(void)
 {
-    GPIOB->ODR |= BIT1; // Set CLK high
+    TIM1637_CLK_PORT->ODR |= (1 << TIM1637_CLK_PIN);
 }
 
+// Sets CLK pin low
 void _tm1637ClkLow(void)
 {
-    GPIOB->ODR &= ~BIT1; // Set CLK low
+    TIM1637_CLK_PORT->ODR &= ~(1 << TIM1637_CLK_PIN);
 }
 
+// Sets DIO pin high
 void _tm1637DioHigh(void)
 {
-    GPIOB->ODR |= BIT0; // Set DIO high
+    TIM1637_DIO_PORT->ODR |= (1 << TIM1637_DIO_PIN);
 }
 
+// Sets DIO pin low
 void _tm1637DioLow(void)
 {
-    GPIOB->ODR &= ~BIT0; // Set DIO low
+    TIM1637_DIO_PORT->ODR &= ~(1 << TIM1637_DIO_PIN);
 }
 
-// Valid brightness values: 0 - 8.
-// 0 = display off.
+// Sets a brightness value (only from 0-8) to allow for 0x87-0x8F
 void tm1637SetBrightness(char brightness)
 {
     // Brightness command:
@@ -137,9 +165,7 @@ void tm1637SetBrightness(char brightness)
     _tm1637Stop();
 }
 
-
-// v: number to display
-// displaySeparator: 0 = no separator, 1 = display :
+// Displays a number (up to 4 digits), with a colon (displaySeparator = 1) if wanted
 void tm1637DisplayDecimal(int v, int displaySeparator)
 {
      /* Segment Map: follows hgfe_dcba, converted to hexadecimal
@@ -165,18 +191,18 @@ void tm1637DisplayDecimal(int v, int displaySeparator)
      for (int i = 0; i < 4; ++i) {
          digitArr[i] = segmentMap[v % 10];
         
-         // Set the decimal point for the third digit (h) 
+         // If the displaySeparator is high, will set the colon ("h" of hgfe_dcba - MSB)
          if (i == 2 && displaySeparator) {
              digitArr[i] |= 1 << 7;
          }
          v /= 10; 
      }
 
-     // The following data transfer is done according to the TIM1637 datasheet, writing SRAM in address auto mode (p4)
+     // Writing SRAM in address auto mode (p4
 
      // Set the data write mode
      _tm1637Start(); // Start transmission
-     _tm1637WriteByte(0x40); // Set data write mode (auto address) -> Use 0x44 for fixed address
+     _tm1637WriteByte(0x40); // Set data write mode (address auto increment mode)
      _tm1637ReadResult(); 
      _tm1637Stop(); // End transmission
 
@@ -197,6 +223,7 @@ void tm1637DisplayDecimal(int v, int displaySeparator)
 
 
 // Displays a scrolling message across the seven-segments
+// Since this takes a while, a ready check is conducted to ensure CPU doesn't miss user ready
 void tm1637ScrollMessage(const char* message, int delay_ms)
 {
     int len = strlen(message);
@@ -248,6 +275,7 @@ void tm1637ScrollMessage(const char* message, int delay_ms)
     }
 }
 
+// Returns the hexadecimal (hgfe_dcba) of allowed characters (off if not allowed)
 char chartosegment(char c) 
 {
      switch(c) 
@@ -277,14 +305,15 @@ char chartosegment(char c)
      }
 }
 
+// Check ready function that is needed for the scrolling function waiting for user ready
 void checkReady(void) 
 {
-     if (GPIOA->IDR & BIT1) { // Home Ready button pressed
+     if (HOME_READY_PORT->IDR & (1 << HOME_READY_PIN)) { // Home Ready button pressed
          home_ready_flag = 1;
-         GPIOB->ODR |= BIT5; // Turn on Home Goal LED
+         HOME_LED_PORT->ODR |= (1 << HOME_LED_PIN);
      } 
-     if (GPIOA->IDR & BIT2) { // Away Ready button pressed
+     if (AWAY_READY_PORT->IDR & (1 << AWAY_READY_PIN)) { // Away Ready button pressed
          away_ready_flag = 1;
-         GPIOB->ODR |= BIT4; // Turn on Away Goal LED
+         AWAY_LED_PORT->ODR |= (1 << AWAY_LED_PIN);
     }
 }
