@@ -1,11 +1,12 @@
 /*
- * Coin Picking Robot (Remote)
+ * Hockey Table: Contains delay functions (ms/µs) and lcd functions
  * util.c
  */
 
  #include "include/stm32l051xx.h"
  #include "util.h"
  
+ // Delays x milliseconds
  void sleep(unsigned int ms) {
 	 unsigned int i;
 	 for (i = 0; i < 4*ms; ++i)
@@ -13,6 +14,7 @@
 	 return;
  }
  
+ // Delays x microseconds
  void usleep(unsigned char us) {
 	 SysTick->LOAD = (SYSCLK / 1000000L * us) - 1;
 	 SysTick->VAL = 0;
@@ -23,6 +25,7 @@
  }
 
 
+ // Initializes the LCD display
  void lcd_init(void) {
 	LCD_E_0;
 	sleep(20);
@@ -39,6 +42,7 @@
 	return;
 }
 
+// Writes a string to the LCD display
 void lcd_print(char *s, unsigned char line, unsigned char clear) {
 	int i;
 
@@ -52,6 +56,7 @@ void lcd_print(char *s, unsigned char line, unsigned char clear) {
 	return;
 }
 
+// Sends a command to the LCD
 void lcd_write_command(unsigned char x) {
 	LCD_RS_0;
 	lcd_byte(x);
@@ -59,6 +64,7 @@ void lcd_write_command(unsigned char x) {
 	return;
 }
 
+// Sends a character to the LCD
 void lcd_write_data(unsigned char x) {
 	LCD_RS_1;
 	lcd_byte(x);
@@ -66,6 +72,7 @@ void lcd_write_data(unsigned char x) {
 	return;
 }
 
+// Determines which byte is sent to the LCD
 void lcd_byte(unsigned char x) {
 	if (x & 0x80) LCD_D7_1; else LCD_D7_0;
 	if (x & 0x40) LCD_D6_1; else LCD_D6_0;
@@ -84,6 +91,7 @@ void lcd_byte(unsigned char x) {
 	return;
 }
 
+// Latches the data
 void lcd_pulse(void) {
 	LCD_E_1;
 	usleep(40);
