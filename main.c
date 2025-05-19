@@ -6,16 +6,17 @@
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
- 
+
+ #include "globals.h"
  #include "include/stm32l051xx.h"
  #include "include/serial.h"
  #include "util.h"
  #include "tim1637.h"
+ #include "ws2812b.h"
  
  #define SYSCLK 32000000L
  #define TICK_FREQ 1000L
  
-
  // STM32L051 Pinout
  /*
  *                    ----------
@@ -24,50 +25,61 @@
  *             PC15 -|3       30|- PB7    HOME_IR
  *             NRST -|4       29|- PB6    AWAY_IR
  *             VDDA -|5       28|- PB5    AWAY_LED
- *  AWAY_RDY    PA0 -|6       27|- PB4    HOME_LED
- *  HOME_RDY    PA1 -|7       26|- PB3    LCD_E
- *   WS2812B    PA2 -|8       25|- PA15   LCD_RS
+ *              PA0 -|6       27|- PB4    HOME_LED
+ *  AWAY_RDY    PA1 -|7       26|- PB3    LCD_E
+ *  HOME_RDY    PA2 -|8       25|- PA15   LCD_RS
  *              PA3 -|9       24|- PA14   LCD_D4
  *  TIME_LED    PA4 -|10      23|- PA13   LCD_D5
  *              PA5 -|11      22|- PA12   LCD_D6
  *              PA6 -|12      21|- PA11   LCD_D7
- *              PA7 -|13      20|- PA10   RXD
+ *   WS2812B    PA7 -|13      20|- PA10   RXD
  *   1637DIO    PB0 -|14      19|- PA9    TXD
  *   1637CLK    PB1 -|15      18|- PA8    
  *              VSS -|16      17|- VDD
  *                    ----------
  */
 
- // PA2: WS2812B LED light ring, general purpose output mode
- // PA4: Period (time) LED, general purpose output mode
- // PA9: TXD (no declaration needed, for the BO230XS USB adapter) 
- // PA10: RXD (no declaration needed, for the BO230XS USB adapter)
- // PA11: LCD_D7, general purpose output mode
- // PA12: LCD_D6, general purpose output mode
- // PA13: LCD_D5, general purpose output mode
- // PA14: LCD_D4, general purpose output mode
- // PA15: LCD_RS, general purpose output mode
+// CHANGE PIN DEFINITIONS AS NECESSARY
 
- // PB0: TM1637 DIO, general purpose output mode **requires 2k pull-up resistor**
- // PB1: TM1637 CLK, general purpose output mode **requires 2k pull-up resistor**
- // PB3: LCD_E, general purpose output mode
- // PB4: AWAY_LED, general purpose output mode
- // PB5: HOME_LED, general purpose output mode
- // PB6: AWAY_IR, general purpose input mode
- // PB7: HOME_IR, general purpose input mode
+// PUSHBUTTONS
+#define HOME_READY_PORT GPIOA
+#define HOME_READY_PIN 2
+#define AWAY_READY_PORT GPIOA
+#define AWAY_READY_PIN 1 
 
- // TIM21: Game clock counter
+// LEDs
+#define HOME_LED_PORT GPIOB
+#define HOME_LED_PIN 4 
+#define AWAY_LED_PORT GPIOB
+#define AWAY_LED_PIN 5 
+#define TIME_LED_PORT GPIOA
+#define TIME_LED_PIN 4 
+
+// IR Sensor
+#define HOME_IR_PORT GPIOB
+#define HOME_IR_PIN 7 
+#define AWAY_IR_PORT GPIOB
+#define AWAY_IR_PIN 6 
+
+// LCD Display
+#define LCD_E_PORT GPIOB
+#define LCD_E_PIN 3 
+#define LCD_RS_PORT GPIOA
+#define LCD_RS_PIN 15
+#define LCD_D4_PORT GPIOA
+#define LCD_D4_PIN 14 
+#define LCD_D5_PORT GPIOA
+#define LCD_D5_PIN 13
+#define LCD_D6_PORT GPIOA
+#define LCD_D6_PIN 12
+#define LCD_D7_PORT GPIOA
+#define LCD_D7_PIN 11
 
  // Function prototypes
  void gpio_init(void);
  void timer21_init(void);
- void tm1637Init(void);
- char chartosegment(char c);
- void checkReady(void);
- void tm1637DisplayDecimal(int v, int displaySeparator);
- void tm1637SetBrightness(char brightness);
- void tm1637ScrollMessage(const char* message, int delay_ms);
-
+ void home_goal(void); 
+ void away_goal(void); 
 
  // Global Variables 
 
@@ -89,13 +101,14 @@
  
  int main(void) 
  {
-
+     
      char lcd_buff[MAXBUFFER];
 
      gpio_init();
      lcd_init();
      timer21_init();
      tm1637Init();
+     spi_init();
 
      sprintf(lcd_buff, "HOME PERIOD AWAY");
      lcd_print(lcd_buff, 1, 1);
@@ -103,8 +116,9 @@
      sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
      lcd_print(lcd_buff, 2, 1);
 
-     tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MM:SS format
-     
+     // Set all 35 LEDs to white for lighting (if isolated 5V power supply use 0xFFFFFF)
+     set_colour(0x1D, 0x1D, 0x1D);
+
      while (1) 
      {
 
@@ -162,7 +176,7 @@
          while(home_ready_flag && away_ready_flag) 
          {
              period_over = 0;
-             GPIOA->ODR &= ~BIT4; // Turn off Period LED
+             TIME_LED_PORT->ODR &= ~(1 << TIME_LED_PIN); // Turn off Period LED
 
              // Start the period timer
              TIM21->CR1 |= TIM_CR1_CEN; 
@@ -177,29 +191,25 @@
                  tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MMSS format
 
                  // Check if the home goal sensor is triggered 
-                 if(GPIOB->IDR & BIT7) {
-                     GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
+                 if(HOME_IR_PORT->IDR & (1 << HOME_IR_PIN)) {
+                     HOME_LED_PORT->ODR &= ~(1 << HOME_LED_PIN); // Turn off Home Goal LED
                  } else {
-                     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
-                     home_score++;
-                     GPIOB->ODR |= BIT4; // Turn on Home Goal LED
-                     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
-                     lcd_print(lcd_buff, 2, 1);
-                     sleep(5000); // Give 5 seconds for user to take puck out of goal
-                     TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
+                    home_goal();
+                    sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
+                    lcd_print(lcd_buff, 2, 1);
+                    sleep(5000); // Give 5 seconds for user to take puck out of goal
+                    TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
                  }
 
                  // Check if the away goal sensor is triggered
-                 if(GPIOB->IDR & BIT6) {
-                     GPIOB->ODR &= ~BIT5; // Turn off Away Goal LED
+                 if(AWAY_IR_PORT->IDR & (1 << AWAY_IR_PIN)) {
+                     AWAY_LED_PORT->ODR &= ~(1 << AWAY_LED_PIN); // Turn off Away Goal LED
                  } else {
-                     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
-                     away_score++;
-                     GPIOB->ODR |= BIT5; // Turn on Away Goal LED
-                     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
-                     lcd_print(lcd_buff, 2, 1);
-                     sleep(5000); // Give 5 seconds for user to take puck out of goal
-                     TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
+                    away_goal();
+                    sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
+                    lcd_print(lcd_buff, 2, 1);
+                    sleep(5000); // Give 5 seconds for user to take puck out of goal
+                    TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
                  }
 
              }
@@ -208,16 +218,14 @@
              if(period > 3) {
 
                  tm1637DisplayDecimal(minutes*100+seconds, 1); // Display in MMSS format
-                 GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
-                 GPIOB->ODR &= ~BIT5; // Turn off Home Goal LED
+                 HOME_LED_PORT->ODR &= ~(1 << HOME_LED_PIN); // Turn off Home Goal LED
+                 AWAY_LED_PORT->ODR &= ~(1 << AWAY_LED_PIN); // Turn off Home Goal LED
 
                  // Check if the home goal sensor is triggered 
-                 if(GPIOB->IDR & BIT7) {
-                     GPIOB->ODR &= ~BIT4; // Turn off Home Goal LED
+                 if(HOME_IR_PORT->IDR & (1 << HOME_IR_PIN)) {
+                     HOME_LED_PORT->ODR &= ~(1 << HOME_LED_PIN); // Turn off Home Goal LED
                  } else {
-                     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
-                     home_score++;
-                     GPIOB->ODR |= BIT4; // Turn on Home Goal LED
+                     home_goal();
                      sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
                      lcd_print(lcd_buff, 2, 1);
                      home_ready_flag = 0;
@@ -225,12 +233,10 @@
                  }
 
                  // Check if the away goal sensor is triggered
-                 if(GPIOB->IDR & BIT6) {
-                     GPIOB->ODR &= ~BIT5; // Turn off Away Goal LED
+                 if(AWAY_IR_PORT->IDR & (1 << AWAY_IR_PIN)) {
+                     AWAY_LED_PORT->ODR &= ~(1 << AWAY_LED_PIN); // Turn off Away Goal LED
                  } else {
-                     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
-                     away_score++;
-                     GPIOB->ODR |= BIT5; // Turn on Away Goal LED
+                     away_goal();
                      sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
                      lcd_print(lcd_buff, 2, 1);
                      home_ready_flag = 0;
@@ -255,36 +261,60 @@
      GPIOB->OSPEEDR=0xFFFFFFFF;
 
      /* Goal LEDs as general purpose output mode */
-     GPIOB->MODER &= ~(BIT11 | BIT10 | BIT9 | BIT8); // for clearing
-     GPIOB->MODER |= BIT10 | BIT8; // 01 (output mode)
+     HOME_LED_PORT->MODER = ((HOME_LED_PORT->MODER & ~(0x3 << HOME_LED_PIN * 2)) | (0x1 << HOME_LED_PIN * 2));
+     AWAY_LED_PORT->MODER = ((AWAY_LED_PORT->MODER & ~(0x3 << AWAY_LED_PIN * 2)) | (0x1 << AWAY_LED_PIN * 2));
+     //  GPIOB->MODER &= ~(BIT11 | BIT10 | BIT9 | BIT8); // for clearing
+     //  GPIOB->MODER |= BIT10 | BIT8; // 01 (output mode)
 
      /* Period LEDs as general purpose output mode */
-     GPIOA->MODER &= ~(BIT9 | BIT8); // for clearing 
-     GPIOA->MODER |= BIT8; // 01 (output mode)
+     TIME_LED_PORT->MODER = ((TIME_LED_PORT->MODER & ~(0x3 << TIME_LED_PIN * 2)) | (0x1 << TIME_LED_PIN * 2));
+     //  GPIOA->MODER &= ~(BIT9 | BIT8); // for clearing 
+     //  GPIOA->MODER |= BIT8; // 01 (output mode)
 
      /* IR Breakbeam Sensors as input, set to pull-down */	
-     GPIOB->MODER &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (input mode)
-     GPIOB->PUPDR &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (pull-down)
-     GPIOB->PUPDR |= BIT15 | BIT13; // 10 (pull-down)
+     HOME_IR_PORT->MODER = (HOME_IR_PORT->MODER & ~(0x3 << HOME_IR_PIN * 2));
+     AWAY_IR_PORT->MODER = (AWAY_IR_PORT->MODER & ~(0x3 << AWAY_IR_PIN * 2));
+     HOME_IR_PORT->PUPDR = ((HOME_IR_PORT->PUPDR & ~(0x3 << HOME_IR_PIN * 2)) | (0x2 << HOME_IR_PIN * 2));
+     AWAY_IR_PORT->PUPDR = ((AWAY_IR_PORT->PUPDR & ~(0x3 << AWAY_IR_PIN * 2)) | (0x2 << AWAY_IR_PIN * 2));
+    //  GPIOB->MODER &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (input mode)
+    //  GPIOB->PUPDR &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (pull-down)
+    //  GPIOB->PUPDR |= BIT15 | BIT13; // 10 (pull-down)
 
      /* Home/Away Ready Pushbuttons as input, set to pull-down */
-     GPIOA->MODER &= ~(BIT3 | BIT2 | BIT1 | BIT0); // input mode
-     GPIOA->PUPDR &= ~(BIT3 | BIT2 | BIT1 | BIT0); // for clearing 
-     GPIOA->PUPDR |= BIT3 | BIT1; // 10 (pull-down)
+     HOME_READY_PORT->MODER = (HOME_READY_PORT->MODER & ~(0x3 << HOME_READY_PIN * 2));
+     AWAY_READY_PORT->MODER = (AWAY_READY_PORT->MODER & ~(0x3 << AWAY_READY_PIN * 2));
+     HOME_READY_PORT->PUPDR = ((HOME_READY_PORT->PUPDR & ~(0x3 << HOME_READY_PIN * 2)) | (0x2 << HOME_READY_PIN * 2));
+     AWAY_READY_PORT->PUPDR = ((AWAY_READY_PORT->PUPDR & ~(0x3 << AWAY_READY_PIN * 2)) | (0x2 << AWAY_READY_PIN * 2));
+    //  GPIOA->MODER &= ~(BIT5 | BIT4 | BIT3 | BIT2); // input mode
+    //  GPIOA->PUPDR &= ~(BIT5 | BIT4 | BIT3 | BIT2); // for clearing 
+    //  GPIOA->PUPDR |= BIT5 | BIT3; // 10 (pull-down)
 
-     /* LCD display as output, set to open-drain PA11-PA15, PB3 */
-     GPIOA->MODER &= ~(BIT31 | BIT30 | BIT29 | BIT28 | BIT27 | BIT26 | BIT25 | BIT24 | BIT23 | BIT22); // for clearing
-     GPIOA->MODER |= BIT30 | BIT28 | BIT26 | BIT24 | BIT22; // 01 (output mode)
-     GPIOA->OTYPER &= ~(BIT11 | BIT12 | BIT13 | BIT14 | BIT15); // push-pull
-     GPIOB->MODER &= ~(BIT7 | BIT6); // for clearing
-     GPIOB->MODER |= BIT6; // 01 (output mode)
-     GPIOB->OTYPER &= ~(BIT3); // push-pull
+     /* LCD display as output, set to push-pull */
+     LCD_E_PORT->MODER = ((LCD_E_PORT->MODER & ~(0x3 << LCD_E_PIN * 2)) | (0x1 << LCD_E_PIN * 2));
+     LCD_RS_PORT->MODER = ((LCD_RS_PORT->MODER & ~(0x3 << LCD_RS_PIN * 2)) | (0x1 << LCD_RS_PIN * 2));
+     LCD_D4_PORT->MODER = ((LCD_D4_PORT->MODER & ~(0x3 << LCD_D4_PIN * 2)) | (0x1 << LCD_D4_PIN * 2));
+     LCD_D5_PORT->MODER = ((LCD_D5_PORT->MODER & ~(0x3 << LCD_D5_PIN * 2)) | (0x1 << LCD_D5_PIN * 2));
+     LCD_D6_PORT->MODER = ((LCD_D6_PORT->MODER & ~(0x3 << LCD_D6_PIN * 2)) | (0x1 << LCD_D6_PIN * 2));
+     LCD_D7_PORT->MODER = ((LCD_D7_PORT->MODER & ~(0x3 << LCD_D7_PIN * 2)) | (0x1 << LCD_D7_PIN * 2));
+     
+     LCD_E_PORT->OTYPER = (LCD_E_PORT->OTYPER & ~(0x1 << LCD_E_PIN));
+     LCD_RS_PORT->OTYPER = (LCD_RS_PORT->OTYPER & ~(0x1 << LCD_RS_PIN));
+     LCD_D4_PORT->OTYPER = (LCD_D4_PORT->OTYPER & ~(0x1 << LCD_D4_PIN));
+     LCD_D5_PORT->OTYPER = (LCD_D5_PORT->OTYPER & ~(0x1 << LCD_D5_PIN));
+     LCD_D6_PORT->OTYPER = (LCD_D6_PORT->OTYPER & ~(0x1 << LCD_D6_PIN));
+     LCD_D7_PORT->OTYPER = (LCD_D7_PORT->OTYPER & ~(0x1 << LCD_D7_PIN));
+    //  GPIOA->MODER &= ~(BIT31 | BIT30 | BIT29 | BIT28 | BIT27 | BIT26 | BIT25 | BIT24 | BIT23 | BIT22); // for clearing
+    //  GPIOA->MODER |= BIT30 | BIT28 | BIT26 | BIT24 | BIT22; // 01 (output mode)
+    //  GPIOA->OTYPER &= ~(BIT11 | BIT12 | BIT13 | BIT14 | BIT15); // push-pull
+    //  GPIOB->MODER &= ~(BIT7 | BIT6); // for clearing
+    //  GPIOB->MODER |= BIT6; // 01 (output mode)
+    //  GPIOB->OTYPER &= ~(BIT3); // push-pull
 
  }
 
  void timer21_init(void) 
 {
-     RCC->APB2ENR |= BIT2;  // Enable clock for TIM21 (p176)
+     RCC->APB2ENR |= RCC_APB2ENR_TIM21EN;  // Enable clock for TIM21 (p176)
 
      // Since SYSCLK is 32MHz, we can prescale the timer to 32000 to get a 1kHz (1s) clock
      TIM21->PSC = 32000 - 1;  // 32 MHz / 32000 = 1 kHz (timer divides clock every 32000 ticks)
@@ -315,7 +345,7 @@ void TIM21_Handler(void)
                  TIM21->CR1 &= ~TIM_CR1_CEN; // Stop timer
                  period_over = 1;
                  period++;
-                 GPIOA->ODR |= BIT4; // Turn on Period LED
+                 TIME_LED_PORT->ODR |= (1 << TIME_LED_PIN); // Turn on Period LED
                  home_ready_flag = 0;
                  away_ready_flag = 0;
                  minutes = 3; // Reset and wait for user ready
@@ -334,191 +364,24 @@ void TIM21_Handler(void)
     }
 }
 
-char chartosegment(char c) 
+// The home goal sequence pauses the game clock, increments the score, turns on the goal LED, and flashes the light
+void home_goal(void) 
 {
-     switch(c) 
-     {
-         case 'A': return 0x77; 
-         case 'b': return 0x7C;
-         case 'C': return 0x39;
-         case 'd': return 0x5E;
-         case 'E': return 0x79;
-         case 'F': return 0x71;
-         case 'g': return 0x6F;
-         case 'H': return 0x76;
-         case 'I': return 0x06;
-         case 'J': return 0x0E;
-         case 'L': return 0x38;
-         case 'n': return 0x54;
-         case 'O': return 0x3F;
-         case 'P': return 0x73;
-         case 'r': return 0x50;
-         case 'S': return 0x6D;
-         case 'U': return 0x3E;
-         case 'X': return 0x76;
-         case 'Y': return 0x6E;
-         case 'Z': return 0x5B;
-         case ' ': return 0x00;
-         default: return 0x00; // Default case for unsupported characters (K, M, Q, T, V, W)
-     }
+    // char lcd_buff[MAXBUFFER];
+
+    TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+    home_score++;
+    HOME_LED_PORT->ODR |= (1 << HOME_LED_PIN); // Turn on Home Goal LED
+    flash_animation(NUM_LEDS, 0xFF, 0x00, 0x00, 50, 100000);
+    set_colour(0x1D, 0x1D, 0x1D);
 }
 
-void checkReady(void) 
+// The away goal sequence pauses the game clock, increments the score, turns on the goal LED, and flashes the light
+void away_goal(void) 
 {
-     if (GPIOA->IDR & BIT0) { // Home Ready button pressed
-         home_ready_flag = 1;
-         GPIOB->ODR |= BIT5; // Turn on Home Goal LED
-     } 
-     if (GPIOA->IDR & BIT1) { // Away Ready button pressed
-         away_ready_flag = 1;
-         GPIOB->ODR |= BIT4; // Turn on Away Goal LED
-    }
-}
-
-// Initializes the pins for the TIM1637 Module (changes GPIO pins if necessary)
-void tm1637Init(void)
-{
-
-    RCC->IOPENR |= BIT1; // Enable GPIOB clock
-    GPIOB->OSPEEDR=0xFFFFFFFF; // Set GPIOB speed to very high
-
-    // DIO Pin
-    GPIOB->MODER &= ~(BIT1 | BIT0); // for clearing
-    GPIOB->MODER |= BIT0; // 01 (output mode)
-    GPIOB->OTYPER |= BIT0; // Open drain
-    GPIOB->PUPDR &= ~(BIT1 | BIT0); // for clearing
-    GPIOB->PUPDR |= BIT0; // 01 (pull-up)
-
-    // CLK Pin
-    GPIOB->MODER &= ~(BIT3 | BIT2); // for clearing
-    GPIOB->MODER |= BIT2; // 01 (output mode)
-    GPIOB->OTYPER |= BIT1; // Open drain
-    GPIOB->PUPDR &= ~(BIT3 | BIT2); // for clearing
-    GPIOB->PUPDR |= BIT2; // 01 (pull-up)
-
-    tm1637SetBrightness(8);
-}
-
-// v: number to display
-// displaySeparator: 0 = no separator, 1 = display :
-void tm1637DisplayDecimal(int v, int displaySeparator)
-{
-     /* Segment Map: follows hgfe_dcba, converted to hexadecimal
-
-         a
-        -----
-     f |  g  |b
-        -----
-     e |     |c   
-        -----   . h
-          d
-
-     */
-     const char segmentMap[] = {
-         0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, // 0-9
-         0x00
-     };
-
-     unsigned char digitArr[4];
-
-     // Puts the number into the digit array in reverse order
-     // E.g. if v= 1234, then digitArr[0] = 4, digitArr[1] = 3, digitArr[2] = 2, digitArr[3] = 1
-     for (int i = 0; i < 4; ++i) {
-         digitArr[i] = segmentMap[v % 10];
-        
-         // Set the decimal point for the third digit (h) 
-         if (i == 2 && displaySeparator) {
-             digitArr[i] |= 1 << 7;
-         }
-         v /= 10; 
-     }
-
-     // The following data transfer is done according to the TIM1637 datasheet, writing SRAM in address auto mode (p4)
-
-     // Set the data write mode
-     _tm1637Start(); // Start transmission
-     _tm1637WriteByte(0x40); // Set data write mode (auto address) -> Use 0x44 for fixed address
-     _tm1637ReadResult(); 
-     _tm1637Stop(); // End transmission
-
-     // Set the address
-     _tm1637Start();
-     _tm1637WriteByte(0xC0); // set display address to the first digit (0xC0)
-     _tm1637ReadResult();
-
-     // Write the digits in reverse order (to be correctly displayed)
-     for (int i = 0; i < 4; ++i) {
-         _tm1637WriteByte(digitArr[3 - i]);
-         _tm1637ReadResult();
-     }
-     
-     // Set the brightness
-     tm1637SetBrightness(8); // Set brightness to maximum
-}
-
-// Valid brightness values: 0 - 8.
-// 0 = display off.
-void tm1637SetBrightness(char brightness)
-{
-    // Brightness command:
-    // 1000 0XXX = display off
-    // 1000 1BBB = display on, brightness 0-7
-    // X = don't care
-    // B = brightness
-    _tm1637Start();
-    _tm1637WriteByte(0x87 + brightness);
-    _tm1637ReadResult();
-    _tm1637Stop();
-}
-
-// Displays a scrolling message across the seven-segments
-void tm1637ScrollMessage(const char* message, int delay_ms)
-{
-    int len = strlen(message);
-    char window[4];
-
-    for (int i = 0; i < len + 4; i++) {
-        checkReady();
-        char segments[4];
-
-        for (int j = 0; j < 4; j++) {
-            checkReady();
-            int msg_index = i - 3 + j;
-            if (msg_index >= 0 && msg_index < len) {
-                segments[j] = chartosegment(message[msg_index]);
-            } else {
-                segments[j] = 0x00; // Blank
-            }
-        }
-
-        checkReady();
-
-        // Start data transmission
-        _tm1637Start();
-        _tm1637WriteByte(0x40); // Set to auto-increment mode
-        _tm1637ReadResult();
-        _tm1637Stop();
-
-        checkReady();
-
-        _tm1637Start();
-        _tm1637WriteByte(0xC0); // Set starting address
-        _tm1637ReadResult();
-
-        for (int k = 0; k < 4; k++) {
-            checkReady();
-            _tm1637WriteByte(segments[k]);
-            _tm1637ReadResult();
-        }
-
-        checkReady();
-
-        _tm1637Stop();
-        tm1637SetBrightness(8);
-
-        checkReady();
-
-        // Delay between scroll steps
-        sleep(delay_ms);
-    }
+    TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
+    away_score++;
+    AWAY_LED_PORT->ODR |= (1 << AWAY_LED_PIN); // Turn on Away Goal LED
+    flash_animation(NUM_LEDS, 0x00, 0x00, 0xFF, 50, 100000);
+    set_colour(0x1D, 0x1D, 0x1D);
 }
