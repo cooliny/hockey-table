@@ -61,20 +61,6 @@
 #define AWAY_IR_PORT GPIOB
 #define AWAY_IR_PIN 6 
 
-// LCD Display
-#define LCD_E_PORT GPIOB
-#define LCD_E_PIN 3 
-#define LCD_RS_PORT GPIOA
-#define LCD_RS_PIN 15
-#define LCD_D4_PORT GPIOA
-#define LCD_D4_PIN 14 
-#define LCD_D5_PORT GPIOA
-#define LCD_D5_PIN 13
-#define LCD_D6_PORT GPIOA
-#define LCD_D6_PIN 12
-#define LCD_D7_PORT GPIOA
-#define LCD_D7_PIN 11
-
  // Function prototypes
  void gpio_init(void);
  void timer21_init(void);
@@ -112,7 +98,6 @@
 
      sprintf(lcd_buff, "HOME PERIOD AWAY");
      lcd_print(lcd_buff, 1, 1);
-
      sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
      lcd_print(lcd_buff, 2, 1);
 
@@ -126,16 +111,15 @@
          while (!(home_ready_flag && away_ready_flag))
          {
 
-             // If periods 1-3
+             // In between periods, will prompt user to ready up and put puck back in puck drop
              if(period <= 3) {
                  checkReady();
                  tm1637ScrollMessage(" rEAdY UP  ", 500);
-
              }
 
-             // Display the final score once game ends
              if(period > 3) {
 
+                // Display the final score once game ends
                 if(home_score != away_score) {
 
                      TIM21->CR1 &= ~TIM_CR1_CEN; 
@@ -170,7 +154,7 @@
              }
          }
 
-         sleep(3000); // Wait for 3 seconds once ready before starting the period puck drop
+         sleep(3000); // Wait for 3 seconds once both players ready before starting the period puck drop
 
          // While the game is in progress check for goal scores + score updates
          while(home_ready_flag && away_ready_flag) 
@@ -193,22 +177,24 @@
                  // Check if the home goal sensor is triggered 
                  if(HOME_IR_PORT->IDR & (1 << HOME_IR_PIN)) {
                      HOME_LED_PORT->ODR &= ~(1 << HOME_LED_PIN); // Turn off Home Goal LED
-                 } else {
+                 } 
+                 else {
                     home_goal();
                     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
                     lcd_print(lcd_buff, 2, 1);
-                    sleep(5000); // Give 5 seconds for user to take puck out of goal
+                    sleep(8000); // Give 8 seconds for user to take puck out of goal
                     TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
                  }
 
                  // Check if the away goal sensor is triggered
                  if(AWAY_IR_PORT->IDR & (1 << AWAY_IR_PIN)) {
                      AWAY_LED_PORT->ODR &= ~(1 << AWAY_LED_PIN); // Turn off Away Goal LED
-                 } else {
+                 } 
+                 else {
                     away_goal();
                     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
                     lcd_print(lcd_buff, 2, 1);
-                    sleep(5000); // Give 5 seconds for user to take puck out of goal
+                    sleep(8000); // Give 8 seconds for user to take puck out of goal
                     TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
                  }
 
@@ -224,7 +210,8 @@
                  // Check if the home goal sensor is triggered 
                  if(HOME_IR_PORT->IDR & (1 << HOME_IR_PIN)) {
                      HOME_LED_PORT->ODR &= ~(1 << HOME_LED_PIN); // Turn off Home Goal LED
-                 } else {
+                 } 
+                 else {
                      home_goal();
                      sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
                      lcd_print(lcd_buff, 2, 1);
@@ -235,7 +222,8 @@
                  // Check if the away goal sensor is triggered
                  if(AWAY_IR_PORT->IDR & (1 << AWAY_IR_PIN)) {
                      AWAY_LED_PORT->ODR &= ~(1 << AWAY_LED_PIN); // Turn off Away Goal LED
-                 } else {
+                 } 
+                 else {
                      away_goal();
                      sprintf(lcd_buff, "  %d    OT    %d ", home_score, away_score);
                      lcd_print(lcd_buff, 2, 1);
@@ -253,8 +241,8 @@
  void gpio_init(void) 
  {
      /* Enable clock for port A and B */
-     RCC->IOPENR |= BIT0;
-     RCC->IOPENR |= BIT1;
+     RCC->IOPENR |= RCC_IOPENR_GPIOAEN;
+     RCC->IOPENR |= RCC_IOPENR_GPIOBEN;
     
      /* Configure port A and B for very high speed (page 201). */
      GPIOA->OSPEEDR=0xFFFFFFFF;
@@ -263,31 +251,21 @@
      /* Goal LEDs as general purpose output mode */
      HOME_LED_PORT->MODER = ((HOME_LED_PORT->MODER & ~(0x3 << HOME_LED_PIN * 2)) | (0x1 << HOME_LED_PIN * 2));
      AWAY_LED_PORT->MODER = ((AWAY_LED_PORT->MODER & ~(0x3 << AWAY_LED_PIN * 2)) | (0x1 << AWAY_LED_PIN * 2));
-     //  GPIOB->MODER &= ~(BIT11 | BIT10 | BIT9 | BIT8); // for clearing
-     //  GPIOB->MODER |= BIT10 | BIT8; // 01 (output mode)
 
      /* Period LEDs as general purpose output mode */
      TIME_LED_PORT->MODER = ((TIME_LED_PORT->MODER & ~(0x3 << TIME_LED_PIN * 2)) | (0x1 << TIME_LED_PIN * 2));
-     //  GPIOA->MODER &= ~(BIT9 | BIT8); // for clearing 
-     //  GPIOA->MODER |= BIT8; // 01 (output mode)
 
      /* IR Breakbeam Sensors as input, set to pull-down */	
      HOME_IR_PORT->MODER = (HOME_IR_PORT->MODER & ~(0x3 << HOME_IR_PIN * 2));
      AWAY_IR_PORT->MODER = (AWAY_IR_PORT->MODER & ~(0x3 << AWAY_IR_PIN * 2));
      HOME_IR_PORT->PUPDR = ((HOME_IR_PORT->PUPDR & ~(0x3 << HOME_IR_PIN * 2)) | (0x2 << HOME_IR_PIN * 2));
      AWAY_IR_PORT->PUPDR = ((AWAY_IR_PORT->PUPDR & ~(0x3 << AWAY_IR_PIN * 2)) | (0x2 << AWAY_IR_PIN * 2));
-    //  GPIOB->MODER &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (input mode)
-    //  GPIOB->PUPDR &= ~(BIT15 | BIT14 | BIT13 | BIT12); // for clearing (pull-down)
-    //  GPIOB->PUPDR |= BIT15 | BIT13; // 10 (pull-down)
 
      /* Home/Away Ready Pushbuttons as input, set to pull-down */
      HOME_READY_PORT->MODER = (HOME_READY_PORT->MODER & ~(0x3 << HOME_READY_PIN * 2));
      AWAY_READY_PORT->MODER = (AWAY_READY_PORT->MODER & ~(0x3 << AWAY_READY_PIN * 2));
      HOME_READY_PORT->PUPDR = ((HOME_READY_PORT->PUPDR & ~(0x3 << HOME_READY_PIN * 2)) | (0x2 << HOME_READY_PIN * 2));
      AWAY_READY_PORT->PUPDR = ((AWAY_READY_PORT->PUPDR & ~(0x3 << AWAY_READY_PIN * 2)) | (0x2 << AWAY_READY_PIN * 2));
-    //  GPIOA->MODER &= ~(BIT5 | BIT4 | BIT3 | BIT2); // input mode
-    //  GPIOA->PUPDR &= ~(BIT5 | BIT4 | BIT3 | BIT2); // for clearing 
-    //  GPIOA->PUPDR |= BIT5 | BIT3; // 10 (pull-down)
 
      /* LCD display as output, set to push-pull */
      LCD_E_PORT->MODER = ((LCD_E_PORT->MODER & ~(0x3 << LCD_E_PIN * 2)) | (0x1 << LCD_E_PIN * 2));
@@ -303,12 +281,6 @@
      LCD_D5_PORT->OTYPER = (LCD_D5_PORT->OTYPER & ~(0x1 << LCD_D5_PIN));
      LCD_D6_PORT->OTYPER = (LCD_D6_PORT->OTYPER & ~(0x1 << LCD_D6_PIN));
      LCD_D7_PORT->OTYPER = (LCD_D7_PORT->OTYPER & ~(0x1 << LCD_D7_PIN));
-    //  GPIOA->MODER &= ~(BIT31 | BIT30 | BIT29 | BIT28 | BIT27 | BIT26 | BIT25 | BIT24 | BIT23 | BIT22); // for clearing
-    //  GPIOA->MODER |= BIT30 | BIT28 | BIT26 | BIT24 | BIT22; // 01 (output mode)
-    //  GPIOA->OTYPER &= ~(BIT11 | BIT12 | BIT13 | BIT14 | BIT15); // push-pull
-    //  GPIOB->MODER &= ~(BIT7 | BIT6); // for clearing
-    //  GPIOB->MODER |= BIT6; // 01 (output mode)
-    //  GPIOB->OTYPER &= ~(BIT3); // push-pull
 
  }
 
