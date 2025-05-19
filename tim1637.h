@@ -3,11 +3,26 @@
 
 #define SYSCLK 32000000L
 
+#define TIM1637_CLK_PORT GPIOB
+#define TIM1637_CLK_PIN 1
+#define TIM1637_DIO_PORT GPIOB
+#define TIM1637_DIO_PIN 0 
+
+#define HOME_READY_PORT GPIOA
+#define HOME_READY_PIN 2
+#define AWAY_READY_PORT GPIOA
+#define AWAY_READY_PIN 1 
+
+#define HOME_LED_PORT GPIOB
+#define HOME_LED_PIN 4 
+#define AWAY_LED_PORT GPIOB
+#define AWAY_LED_PIN 5 
+
 void tm1637Init(void); 
 void _tm1637Start(void);
 void _tm1637Stop(void);
-void _tm1637ReadResult(void);
 void _tm1637WriteByte(unsigned char b);
+void _tm1637ReadResult(void);
 void _tm1637DelayUsec(unsigned int i);
 void _tm1637ClkHigh(void);
 void _tm1637ClkLow(void);
