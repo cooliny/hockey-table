@@ -292,7 +292,7 @@
      TIM21->PSC = 32000 - 1;  // 32 MHz / 32000 = 1 kHz (timer divides clock every 32000 ticks)
      TIM21->ARR = 1000 - 1;   // 1 kHz / 1000 = 1 Hz (timer overflows every 1000 ticks)
 
-     NVIC->ISER[0] |= BIT20; // enable timer 2 interrupts in the NVIC (position 15 in the ISER register - p240)
+     NVIC->ISER[0] |= (1 << TIM21_IRQn); // enable timer 2 interrupts in the NVIC (position 20 in the ISER register - p240)
 
      TIM21->CR1 &= ~TIM_CR1_DIR; // Upcounting 
      TIM21->CR1 |= TIM_CR1_ARPE; // ARPE enable       
