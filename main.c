@@ -31,7 +31,7 @@
  *              PA3 -|9       24|- PA14   LCD_D4
  *  TIME_LED    PA4 -|10      23|- PA13   LCD_D5
  *              PA5 -|11      22|- PA12   LCD_D6
- *              PA6 -|12      21|- PA11   LCD_D7
+ *     SERVO    PA6 -|12      21|- PA11   LCD_D7
  *   WS2812B    PA7 -|13      20|- PA10   RXD
  *   1637DIO    PB0 -|14      19|- PA9    TXD
  *   1637CLK    PB1 -|15      18|- PA8    
@@ -39,9 +39,11 @@
  *                    ----------
  */
 
+// May consider using two pins for TIME_LED instead of one
+
 // CHANGE PIN DEFINITIONS AS NECESSARY
 
-// PUSHBUTTONS
+// Pushbuttons
 #define HOME_READY_PORT GPIOA
 #define HOME_READY_PIN 2
 #define AWAY_READY_PORT GPIOA
@@ -61,11 +63,17 @@
 #define AWAY_IR_PORT GPIOB
 #define AWAY_IR_PIN 6 
 
+// Servo for Puck Drop
+#define SERVO_PORT GPIOA
+#define SERVO_PIN 6
+
  // Function prototypes
  void gpio_init(void);
  void timer21_init(void);
+ void timer22_init(void);
  void home_goal(void); 
  void away_goal(void); 
+ void puck_drop(void);
 
  // Global Variables 
 
@@ -95,6 +103,7 @@
      timer21_init();
      tm1637Init();
      spi_init();
+     timer22_init();
 
      sprintf(lcd_buff, "HOME PERIOD AWAY");
      lcd_print(lcd_buff, 1, 1);
@@ -155,15 +164,22 @@
          }
 
          sleep(3000); // Wait for 3 seconds once both players ready before starting the period puck drop
+         puck_drop(); 
 
          // While the game is in progress check for goal scores + score updates
          while(home_ready_flag && away_ready_flag) 
          {
+
              period_over = 0;
              TIME_LED_PORT->ODR &= ~(1 << TIME_LED_PIN); // Turn off Period LED
 
              // Start the period timer
              TIM21->CR1 |= TIM_CR1_CEN; 
+
+             // If puck is not returned in time use ready button to manually drop puck
+             if((HOME_READY_PORT->IDR & (1 << HOME_READY_PIN)) | (AWAY_READY_PORT->IDR & (1 << AWAY_READY_PIN))) {
+                puck_drop();
+             }
 
              // For periods 1-3
              if(period <= 3) {
@@ -183,6 +199,7 @@
                     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
                     lcd_print(lcd_buff, 2, 1);
                     sleep(8000); // Give 8 seconds for user to take puck out of goal
+                    puck_drop();
                     TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
                  }
 
@@ -195,6 +212,7 @@
                     sprintf(lcd_buff, "  %d     %d    %d ", home_score, period, away_score);
                     lcd_print(lcd_buff, 2, 1);
                     sleep(8000); // Give 8 seconds for user to take puck out of goal
+                    puck_drop(); 
                     TIM21->CR1 |= TIM_CR1_CEN;    // Resume timer 
                  }
 
@@ -282,6 +300,11 @@
      LCD_D6_PORT->OTYPER = (LCD_D6_PORT->OTYPER & ~(0x1 << LCD_D6_PIN));
      LCD_D7_PORT->OTYPER = (LCD_D7_PORT->OTYPER & ~(0x1 << LCD_D7_PIN));
 
+     // Servo as alternate function mode, set to PWM output mode, push-pull (PA6 - TIM22 CH1)
+     SERVO_PORT->MODER = ((SERVO_PORT->MODER & ~(0x3 << SERVO_PIN * 2)) | (0x2 << SERVO_PIN * 2));
+     SERVO_PORT->AFR[0] = ((SERVO_PORT->AFR[0] & ~(0xF << SERVO_PIN * 4)) | (0x5 << SERVO_PIN * 4)); // AF5 selected (0101)
+     SERVO_PORT->OTYPER = (SERVO_PORT->OTYPER & ~(0x1 << SERVO_PIN));
+
  }
 
  void timer21_init(void) 
@@ -300,6 +323,36 @@
 
      __enable_irq(); // Enable interrupts
 }    
+
+void timer22_init(void)
+{
+
+    RCC->APB2ENR |= RCC_APB2ENR_TIM22EN;  // Enable clock for TIM22 (p176)
+
+    TIM22->PSC = 32-1; // 32 MHz / 32 = 1 MHz (timer divides clock every 32 ticks)
+    TIM22->ARR = 20000-1; // 50Hz (20ms per servo datashet)
+
+    // Set PWM mode 1 on Channel 1 (OC1M = 110), enable preload
+    TIM22->CCMR1 &= ~TIM_CCMR1_OC1M;
+    TIM22->CCMR1 |= (BIT6 | BIT5);  // PWM mode 1
+    TIM22->CCMR1 |= TIM_CCMR1_OC1PE; // Enable preload
+
+    // Enable output compare on CH1
+    TIM22->CCER |= TIM_CCER_CC1E;
+
+    // Set duty cycle: 1500 = 1.5 ms (neutral position)
+    // NOTE: 1150 for parallel position, 2115 for perpendicular position
+    TIM22->CCR1 = 2115;
+
+    // Enable auto-reload preload
+    TIM22->CR1 |= TIM_CR1_ARPE;
+
+    TIM22->EGR |= TIM_EGR_UG; // Force update to load registers
+
+    // Enable counter
+    TIM22->CR1 |= TIM_CR1_CEN;
+
+}
 
 // Timer 2 interrupt handler: 
 // This only handles the time display and increments the period once over
@@ -356,4 +409,11 @@ void away_goal(void)
     AWAY_LED_PORT->ODR |= (1 << AWAY_LED_PIN); // Turn on Away Goal LED
     flash_animation(NUM_LEDS, 0x00, 0x00, 0xFF, 50, 100000);
     set_colour(0x1D, 0x1D, 0x1D);
+}
+
+void puck_drop(void) 
+{
+    TIM22->CCR1 = 1150;
+    sleep(1000);
+    TIM22->CCR1 = 2115;
 }
