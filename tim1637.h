@@ -9,7 +9,7 @@
 #define TIM1637_DIO_PIN 0 
 
 #define HOME_READY_PORT GPIOA
-#define HOME_READY_PIN 2
+#define HOME_READY_PIN 5
 #define AWAY_READY_PORT GPIOA
 #define AWAY_READY_PIN 1 
 
@@ -23,7 +23,6 @@ void _tm1637Start(void);
 void _tm1637Stop(void);
 void _tm1637WriteByte(unsigned char b);
 void _tm1637ReadResult(void);
-void _tm1637DelayUsec(unsigned int i);
 void _tm1637ClkHigh(void);
 void _tm1637ClkLow(void);
 void _tm1637DioHigh(void);
