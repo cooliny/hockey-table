@@ -72,7 +72,7 @@ void _tm1637Start(void)
 {
     _tm1637ClkHigh();
     _tm1637DioHigh();
-    _tm1637DelayUsec(2);
+    usleep(4); 
     _tm1637DioLow();
 }
 
@@ -80,11 +80,11 @@ void _tm1637Start(void)
 void _tm1637Stop(void)
 {
     _tm1637ClkLow();
-    _tm1637DelayUsec(2);
+    usleep(4);
     _tm1637DioLow();
-    _tm1637DelayUsec(2);
+    usleep(4);
     _tm1637ClkHigh();
-    _tm1637DelayUsec(2);
+    usleep(4);
     _tm1637DioHigh();
 }
 
@@ -99,10 +99,10 @@ void _tm1637WriteByte(unsigned char b)
         else {
             _tm1637DioLow();
         }
-        _tm1637DelayUsec(3);
+        usleep(5);
         b >>= 1;
         _tm1637ClkHigh();
-        _tm1637DelayUsec(3);
+        usleep(5);
     }
 }
 
@@ -110,21 +110,11 @@ void _tm1637WriteByte(unsigned char b)
 void _tm1637ReadResult(void)
 {
     _tm1637ClkLow();
-    _tm1637DelayUsec(5);
+    usleep(5);
     // while (dio); // We're cheating here and not actually reading back the response.
     _tm1637ClkHigh();
-    _tm1637DelayUsec(2);
+    usleep(5);
     _tm1637ClkLow();
-}
-
-// Delay function 
-void _tm1637DelayUsec(unsigned int i)
-{
-     for (; i>0; i--) {
-        for (int j = 0; j < 10; ++j) {
-            __asm__ __volatile__("nop\n\t":::"memory");
-        }
-     }
 }
 
 // Sets CLK pin high
