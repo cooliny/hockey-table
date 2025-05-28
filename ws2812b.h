@@ -15,6 +15,6 @@ void send_buffer(int len);
 void ws2812b_reset(void);
 void set_colour(uint8_t r, uint8_t g, uint8_t b);
 void spin_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int active_leds, int delay); 
-void flash_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int flashes, int delay);
+void flash_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int flashes);
 
 #endif /* WS2812B_H */
