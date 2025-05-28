@@ -27,10 +27,10 @@
  *             VDDA -|5       28|- PB5    AWAY_LED
  *              PA0 -|6       27|- PB4    HOME_LED
  *  AWAY_RDY    PA1 -|7       26|- PB3    LCD_E
- *  HOME_RDY    PA2 -|8       25|- PA15   LCD_RS
- *              PA3 -|9       24|- PA14   LCD_D4
+ *     USART    PA2 -|8       25|- PA15   LCD_RS
+ *     USART    PA3 -|9       24|- PA14   LCD_D4
  *  TIME_LED    PA4 -|10      23|- PA13   LCD_D5
- *              PA5 -|11      22|- PA12   LCD_D6
+ *  HOME_RDY    PA5 -|11      22|- PA12   LCD_D6
  *     SERVO    PA6 -|12      21|- PA11   LCD_D7
  *   WS2812B    PA7 -|13      20|- PA10   RXD
  *   1637DIO    PB0 -|14      19|- PA9    TXD
@@ -45,7 +45,7 @@
 
 // Pushbuttons
 #define HOME_READY_PORT GPIOA
-#define HOME_READY_PIN 2
+#define HOME_READY_PIN 5
 #define AWAY_READY_PORT GPIOA
 #define AWAY_READY_PIN 1 
 
@@ -397,7 +397,7 @@ void home_goal(void)
     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
     home_score++;
     HOME_LED_PORT->ODR |= (1 << HOME_LED_PIN); // Turn on Home Goal LED
-    flash_animation(NUM_LEDS, 0xFF, 0x00, 0x00, 50, 100000);
+    flash_animation(NUM_LEDS, 0xFF, 0x00, 0x00, 50);
     set_colour(0x1D, 0x1D, 0x1D);
 }
 
@@ -407,7 +407,7 @@ void away_goal(void)
     TIM21->CR1 &= ~TIM_CR1_CEN;    // Pause timer
     away_score++;
     AWAY_LED_PORT->ODR |= (1 << AWAY_LED_PIN); // Turn on Away Goal LED
-    flash_animation(NUM_LEDS, 0x00, 0x00, 0xFF, 50, 100000);
+    flash_animation(NUM_LEDS, 0x00, 0x00, 0xFF, 50);
     set_colour(0x1D, 0x1D, 0x1D);
 }
 
