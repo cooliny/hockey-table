@@ -43,7 +43,7 @@ void spi_init(void)
 
     // Set pin to AF Mode (E.g. AF0 on PA7)
     WS2812B_PORT->MODER = ((WS2812B_PORT->MODER & ~(0x3 << WS2812B_PIN * 2)) | (0x2 << WS2812B_PIN * 2));
-    WS2812B_PORT->AFR[0] &= ~(0XF << WS2812B_PIN * 4);
+    WS2812B_PORT->AFR[0] &= ~(0XF << WS2812B_PIN * 4); // 0000
 
     // SPI1 config: master, software slave, baud rate = f_PCLK / 8 = 4 MHz
     SPI1->CR1 = SPI_CR1_MSTR   // Master
@@ -103,9 +103,9 @@ void send_buffer(int len)
 // Delays 50µs for reset during the end of a transmission 
 void ws2812b_reset(void)
 {
-    for (volatile int i = 0; i < 3000; i++)
-        ; // crude ~50 µs delay
-    // usleep(50); 
+    // for (volatile int i = 0; i < 3000; i++)
+    //     ; // crude ~50 µs delay
+    usleep(50); 
 }
 
 // Sets a colour to all NUM_LEDS LEDs
@@ -142,14 +142,13 @@ void spin_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int active_le
     send_buffer(num_leds * 24);
     ws2812b_reset();
 
-    for (volatile int d = 0; d < delay; d++)
-        ; // crude delay
+    usleep(delay); 
 
     pos = (pos + 1) % num_leds;
 }
 
 // Will flash all the LEDS a specified amount of times
-void flash_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int flashes, int delay)
+void flash_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int flashes)
 {
     for (int i = 0; i < flashes; i++)
     {
@@ -160,8 +159,7 @@ void flash_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int flashes,
         }
         send_buffer(num_leds * 24);
         ws2812b_reset();
-        for (volatile int d = 0; d < delay; d++)
-            ;
+        sleep(16);
 
         // Turn LEDs OFF
         for (int j = 0; j < num_leds; j++)
@@ -170,7 +168,6 @@ void flash_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int flashes,
         }
         send_buffer(num_leds * 24);
         ws2812b_reset();
-        for (volatile int d = 0; d < delay; d++)
-            ; // crude delay
+        sleep(16);
     }
 }
