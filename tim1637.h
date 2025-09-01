@@ -13,7 +13,7 @@
 #define AWAY_READY_PORT GPIOA
 #define AWAY_READY_PIN 1 
 
-#define HOME_LED_PORT GPIOB
+#define HOME_LED_PORT GPIOA
 #define HOME_LED_PIN 4 
 #define AWAY_LED_PORT GPIOB
 #define AWAY_LED_PIN 5 
