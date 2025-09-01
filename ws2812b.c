@@ -103,8 +103,6 @@ void send_buffer(int len)
 // Delays 50µs for reset during the end of a transmission 
 void ws2812b_reset(void)
 {
-    // for (volatile int i = 0; i < 3000; i++)
-    //     ; // crude ~50 µs delay
     usleep(50); 
 }
 
@@ -147,7 +145,7 @@ void spin_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int active_le
     pos = (pos + 1) % num_leds;
 }
 
-// Will flash all the LEDS a specified amount of times
+// Will flash all the LEDS a specified amount of times and reset game lighting to white
 void flash_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int flashes)
 {
     for (int i = 0; i < flashes; i++)
@@ -169,5 +167,6 @@ void flash_animation(int num_leds, uint8_t r, uint8_t g, uint8_t b, int flashes)
         send_buffer(num_leds * 24);
         ws2812b_reset();
         sleep(16);
+        set_colour(0x1D, 0x1D, 0x1D);
     }
 }
