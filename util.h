@@ -9,10 +9,10 @@
  #define SYSCLK 32000000L
 
 // LCD Display
-#define LCD_E_PORT GPIOB
-#define LCD_E_PIN 3 
-#define LCD_RS_PORT GPIOA
-#define LCD_RS_PIN 15
+#define LCD_E_PORT GPIOA
+#define LCD_E_PIN 15
+#define LCD_RS_PORT GPIOB
+#define LCD_RS_PIN 3
 #define LCD_D4_PORT GPIOA
 #define LCD_D4_PIN 14 
 #define LCD_D5_PORT GPIOA
