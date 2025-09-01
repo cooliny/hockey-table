@@ -1,4 +1,7 @@
-// globals.h
+/*
+ * Hockey table: Global variables used in other functions
+ * globals.h
+ */
 
 #ifndef GLOBALS_H
 #define GLOBALS_H
